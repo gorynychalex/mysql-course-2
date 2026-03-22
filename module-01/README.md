@@ -5,14 +5,16 @@
 ## Содержание модуля
 
 1. Дистрибутив
-2. Структура файлов
-3. Настройка конфигурационного файла
-4. Инициализация данных сервера
-5. Запуск сервера
-6. Запуск консоли mysql
-7. Команды консоли
-8. Работа с MySQL Workbench
-9. Базовые команды SQL
+2. MySQL vs MariaDB — различия
+3. Структура файлов
+4. Настройка конфигурационного файла
+5. Инициализация данных сервера
+6. Запуск сервера
+7. Развёртывание через Docker
+8. Запуск консоли mysql
+9. Команды консоли
+10. Работа с MySQL Workbench
+11. Базовые команды SQL
 
 ---
 
@@ -45,7 +47,137 @@
 
 ---
 
-## 2. Структура файлов MySQL
+## 2. MySQL vs MariaDB — различия
+
+### История разделения
+
+**MariaDB** — это форк MySQL, созданный в 2009 году Михаэлем Видениусом, оригинальным разработчиком MySQL. После покупки MySQL компанией Sun Microsystems, а затем Oracle, сообщество открыло форк для сохранения открытости проекта.
+
+### Сравнительная таблица
+
+| Характеристика | MySQL | MariaDB |
+|----------------|-------|---------|
+| **Владелец** | Oracle Corporation | MariaDB Foundation |
+| **Лицензия** | GPL + коммерческая | GPL |
+| **Движок по умолчанию** | InnoDB | InnoDB (ранее Aria) |
+| **Репликация** | Есть | Есть + Galera Cluster |
+| **Производительность** | Хорошая | Выше на 15-25% для некоторых задач |
+| **Новые функции** | Консервативно | Более агрессивно |
+| **Совместимость** | — | 100% бинарная совместимость |
+| **Версионность** | 5.7, 8.0, 8.1 | 10.x, 11.x |
+
+### Ключевые различия
+
+#### 1. Хранилища
+
+```sql
+-- MySQL
+SHOW ENGINES;
+-- InnoDB (default), MyISAM, MEMORY, ARCHIVE, CSV
+
+-- MariaDB
+SHOW ENGINES;
+-- InnoDB, Aria, ColumnStore, Spider, MyRocks
+```
+
+**MariaDB дополнительные движки:**
+- **Aria** — улучшенный MyISAM с транзакциями
+- **ColumnStore** — колоночное хранилище для аналитики
+- **Spider** — шардирование
+- **MyRocks** — движок от Facebook
+
+#### 2. Функции и возможности
+
+| Функция | MySQL 8.0 | MariaDB 10.x |
+|---------|-----------|--------------|
+| Оконные функции | Да | Да |
+| CTE (Common Table Expressions) | Да | Да |
+| JSON функции | Да | Да (ограниченно) |
+| GIS | Да | Да |
+| Fulltext поиск | Да | Да |
+| Виртуальные колонки | Да | Да |
+| Temporal tables | Да (8.0.26+) | Да |
+
+#### 3. Синтаксические различия
+
+```sql
+-- MariaDB поддерживает RETURNING в INSERT/UPDATE/DELETE
+INSERT INTO users (name, email) VALUES ('John', 'john@test.com')
+RETURNING id;
+
+-- MySQL требует отдельного SELECT
+INSERT INTO users (name, email) VALUES ('John', 'john@test.com');
+SELECT LAST_INSERT_ID();
+
+-- MariaDB: EXCEPT и INTERSECT
+SELECT id FROM t1 EXCEPT SELECT id FROM t2;
+
+-- MySQL: использует LEFT JOIN
+SELECT t1.id FROM t1 LEFT JOIN t2 ON t1.id = t2.id WHERE t2.id IS NULL;
+```
+
+#### 4. Функции MariaDB без аналогов в MySQL
+
+```sql
+-- CONNECT — подключение к внешним источникам
+CREATE TABLE remote_table (
+    id INT
+) ENGINE=CONNECT TABLE_TYPE=ODBC CONNECTION='dsn=mydb';
+
+-- SEQUENCE — генератор последовательностей
+CREATE SEQUENCE my_seq START WITH 1 INCREMENT BY 1;
+SELECT NEXT VALUE FOR my_seq;
+
+-- SYSTEM VERSIONING — темпоральные таблицы
+CREATE TABLE employees (
+    id INT,
+    name VARCHAR(100),
+    salary INT
+) WITH SYSTEM VERSIONING;
+```
+
+#### 5. Производительность
+
+| Тест | MySQL 8.0 | MariaDB 10.6 |
+|------|-----------|--------------|
+| SELECT (простой) | 100% | 115% |
+| JOIN | 100% | 120% |
+| INSERT массовый | 100% | 110% |
+| Репликация | 100% | 125% |
+
+### Что выбрать?
+
+#### Выбирайте **MySQL**, если:
+- ✅ Требуется официальная поддержка Oracle
+- ✅ Используете MySQL Enterprise Edition
+- ✅ Нужна максимальная совместимость с облачными сервисами
+- ✅ Команда уже имеет опыт с MySQL
+
+#### Выбирайте **MariaDB**, если:
+- ✅ Важна открытость проекта
+- ✅ Нужны дополнительные движки (ColumnStore, Spider)
+- ✅ Требуется лучшая производительность для чтения
+- ✅ Планируется использование Galera Cluster
+- ✅ Нужны функции RETURNING, SEQUENCE, темпоральные таблицы
+
+### Миграция между MySQL и MariaDB
+
+```bash
+# Экспорт из MySQL
+mysqldump -u root -p --all-databases > backup.sql
+
+# Импорт в MariaDB
+mysql -u root -p < backup.sql
+
+# Проверка совместимости
+mysqlcheck -u root -p --all-databases --check-upgrade
+```
+
+**Важно:** MariaDB обратно совместима с MySQL, но не все функции MySQL 8.0 поддерживаются в старых версиях MariaDB.
+
+---
+
+## 3. Структура файлов MySQL
 
 ### Основные директории
 
@@ -76,7 +208,7 @@ data/
 
 ---
 
-## 3. Настройка конфигурационного файла
+## 4. Настройка конфигурационного файла
 
 ### Расположение конфигурационных файлов
 
@@ -131,7 +263,7 @@ default-character-set=utf8mb4
 
 ---
 
-## 4. Инициализация данных сервера
+## 5. Инициализация данных сервера
 
 ### Инициализация для Linux
 
@@ -159,7 +291,7 @@ mysqld --initialize --console
 
 ---
 
-## 5. Запуск сервера
+## 6. Запуск сервера
 
 ### Linux (systemd)
 
@@ -204,7 +336,344 @@ launchctl load -w /Library/LaunchDaemons/com.oracle.oss.mysql.plist
 
 ---
 
-## 6. Запуск консоли mysql
+## 7. Развёртывание MySQL (MariaDB) при помощи Docker
+
+### Преимущества Docker для разработки
+
+- ✅ Быстрое развёртывание (одна команда)
+- ✅ Изоляция от основной системы
+- ✅ Лёгкое переключение между версиями
+- ✅ Воспроизводимая среда
+- ✅ Чистая система после удаления контейнера
+
+### Требования
+
+- Docker Desktop (Windows/macOS) или Docker Engine (Linux)
+- Docker Compose (опционально, для сложных конфигураций)
+
+### Быстрый запуск MySQL
+
+```bash
+# MySQL 8.0 с паролем root
+docker run --name mysql-dev \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -e MYSQL_DATABASE=library \
+  -e MYSQL_USER=librarian \
+  -e MYSQL_PASSWORD=librarian123 \
+  -p 3306:3306 \
+  -d mysql:8.0
+
+# Подключение
+docker exec -it mysql-dev mysql -u root -prootpassword
+
+# Или из хоста
+mysql -h 127.0.0.1 -P 3306 -u root -prootpassword
+```
+
+### Быстрый запуск MariaDB
+
+```bash
+# MariaDB 10.11 (LTS)
+docker run --name mariadb-dev \
+  -e MARIADB_ROOT_PASSWORD=rootpassword \
+  -e MARIADB_DATABASE=library \
+  -e MARIADB_USER=librarian \
+  -e MARIADB_PASSWORD=librarian123 \
+  -p 3306:3306 \
+  -d mariadb:10.11
+
+# Подключение
+docker exec -it mariadb-dev mariadb -u root -prootpassword
+```
+
+### Параметры Docker
+
+| Параметр | Описание |
+|----------|----------|
+| `--name` | Имя контейнера |
+| `-e MYSQL_ROOT_PASSWORD` | Пароль root |
+| `-e MYSQL_DATABASE` | Создать БД при старте |
+| `-e MYSQL_USER` | Создать пользователя |
+| `-e MYSQL_PASSWORD` | Пароль пользователя |
+| `-p 3306:3306` | Проброс порта (хост:контейнер) |
+| `-d` | Запуск в фоне (daemon) |
+| `-v` | Том для сохранения данных |
+| `--restart` | Политика перезапуска |
+
+### Запуск с сохранением данных
+
+```bash
+# С именованным томом (рекомендуется)
+docker run --name mysql-dev \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -v mysql_data:/var/lib/mysql \
+  -p 3306:3306 \
+  -d mysql:8.0
+
+# С томом-папкой
+docker run --name mysql-dev \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -v /path/on/host:/var/lib/mysql \
+  -p 3306:3306 \
+  -d mysql:8.0
+```
+
+### Управление контейнером
+
+```bash
+# Просмотр запущенных контейнеров
+docker ps
+
+# Просмотр всех контейнеров
+docker ps -a
+
+# Остановка контейнера
+docker stop mysql-dev
+
+# Запуск остановленного контейнера
+docker start mysql-dev
+
+# Перезапуск
+docker restart mysql-dev
+
+# Удаление контейнера
+docker rm mysql-dev
+
+# Удаление с данными
+docker rm -v mysql-dev
+```
+
+### Docker Compose для разработки
+
+Создайте файл `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-dev
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: library
+      MYSQL_USER: librarian
+      MYSQL_PASSWORD: librarian123
+      MYSQL_ROOT_HOST: '%'
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-scripts:/docker-entrypoint-initdb.d
+      - ./my.cnf:/etc/mysql/conf.d/custom.cnf
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Альтернативно: MariaDB
+  # mariadb:
+  #   image: mariadb:10.11
+  #   container_name: mariadb-dev
+  #   restart: unless-stopped
+  #   environment:
+  #     MARIADB_ROOT_PASSWORD: rootpassword
+  #     MARIADB_DATABASE: library
+  #     MARIADB_USER: librarian
+  #     MARIADB_PASSWORD: librarian123
+  #   ports:
+  #     - "3306:3306"
+  #   volumes:
+  #     - mariadb_data:/var/lib/mysql
+
+  # phpMyAdmin для управления
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: phpmyadmin-dev
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: rootpassword
+      APACHE_PORT: 8080
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+
+volumes:
+  mysql_data:
+    driver: local
+  # mariadb_data:
+  #   driver: local
+```
+
+### Использование Docker Compose
+
+```bash
+# Запуск всех сервисов
+docker-compose up -d
+
+# Просмотр логов
+docker-compose logs -f mysql
+
+# Остановка
+docker-compose down
+
+# Остановка с удалением томов (данные будут удалены!)
+docker-compose down -v
+
+# Пересоздание контейнера
+docker-compose up -d --force-recreate
+
+# Выполнение команды в контейнере
+docker-compose exec mysql mysql -u root -prootpassword -e "SHOW DATABASES;"
+```
+
+### Инициализационные скрипты
+
+Скрипты в `/docker-entrypoint-initdb.d` выполняются при первом запуске:
+
+```bash
+# ./init-scripts/01-create-tables.sql
+CREATE DATABASE IF NOT EXISTS quiz_db;
+USE quiz_db;
+
+CREATE TABLE questions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    question_text TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE answers (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    question_id INT NOT NULL,
+    answer_text VARCHAR(500) NOT NULL,
+    is_correct BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (question_id) REFERENCES questions(id)
+);
+```
+
+```bash
+# ./init-scripts/02-insert-data.sql
+USE quiz_db;
+
+INSERT INTO questions (question_text) VALUES
+('Что такое SQL?'),
+('Что такое база данных?');
+
+INSERT INTO answers (question_id, answer_text, is_correct) VALUES
+(1, 'Structured Query Language', TRUE),
+(1, 'Simple Question Language', FALSE),
+(2, 'Организованная совокупность данных', TRUE),
+(2, 'Набор файлов', FALSE);
+```
+
+### Переключение между MySQL и MariaDB
+
+```bash
+# Остановить MySQL
+docker stop mysql-dev
+docker rm mysql-dev
+
+# Запустить MariaDB
+docker run --name mariadb-dev \
+  -e MARIADB_ROOT_PASSWORD=rootpassword \
+  -v mysql_data:/var/lib/mysql \
+  -p 3306:3306 \
+  -d mariadb:10.11
+
+# Проверка версии
+docker exec -it mariadb-dev mariadb -u root -prootpassword -e "SELECT VERSION();"
+```
+
+### Переменные окружения
+
+#### MySQL
+
+| Переменная | Описание |
+|------------|----------|
+| `MYSQL_ROOT_PASSWORD` | Пароль root (обязательно) |
+| `MYSQL_DATABASE` | БД для создания |
+| `MYSQL_USER` | Пользователь |
+| `MYSQL_PASSWORD` | Пароль пользователя |
+| `MYSQL_ROOT_HOST` | Хост для root (по умолчанию localhost) |
+
+#### MariaDB
+
+| Переменная | Описание |
+|------------|----------|
+| `MARIADB_ROOT_PASSWORD` | Пароль root |
+| `MARIADB_DATABASE` | БД для создания |
+| `MARIADB_USER` | Пользователь |
+| `MARIADB_PASSWORD` | Пароль пользователя |
+| `MARIADB_ROOT_HOST` | Хост для root |
+
+### Отладка и мониторинг
+
+```bash
+# Логи контейнера
+docker logs mysql-dev
+
+# Статистика ресурсов
+docker stats mysql-dev
+
+# Информация о контейнере
+docker inspect mysql-dev
+
+# Выполнение команды
+docker exec -it mysql-dev mysqladmin -u root -prootpassword processlist
+
+# Копирование файлов
+docker cp mysql-dev:/var/lib/mysql ./backup
+docker cp ./dump.sql mysql-dev:/docker-entrypoint-initdb.d/
+```
+
+### Безопасность
+
+```yaml
+# Не используйте в production без изменений!
+# Для production:
+# 1. Не пробрасывайте порт наружу без необходимости
+# 2. Используйте secrets вместо environment
+# 3. Настройте сеть
+# 4. Используйте read-only файловую систему
+
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    secrets:
+      - mysql_root_password
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    # ... остальная конфигурация
+
+secrets:
+  mysql_root_password:
+    external: true
+```
+
+### Полезные образы
+
+| Образ | Описание |
+|-------|----------|
+| `mysql:8.0` | Официальный MySQL 8.0 |
+| `mysql:8.4` | MySQL 8.4 (LTS) |
+| `mariadb:10.11` | MariaDB 10.11 (LTS) |
+| `mariadb:11.2` | MariaDB 11.2 (latest) |
+| `percona/percona-server` | Percona Server (форк MySQL) |
+| `phpmyadmin` | phpMyAdmin для управления |
+| `adminer` | Лёгкая альтернатива phpMyAdmin |
+
+---
+
+## 8. Запуск консоли mysql
 
 ### Подключение к серверу
 
@@ -236,7 +705,7 @@ mysql -u root -p database_name
 
 ---
 
-## 7. Команды консоли mysql
+## 9. Команды консоли mysql
 
 ### Основные команды
 
@@ -288,7 +757,7 @@ delimiter ;
 
 ---
 
-## 8. Работа с MySQL Workbench
+## 10. Работа с MySQL Workbench
 
 ### Подключение к серверу
 
@@ -323,7 +792,7 @@ CREATE DATABASE database_name
 
 ---
 
-## 9. Базовые команды SQL
+## 11. Базовые команды SQL
 
 ### DDL (Data Definition Language)
 
