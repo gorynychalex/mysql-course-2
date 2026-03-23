@@ -174,19 +174,26 @@ INSERT INTO game_sessions (player_id, category_id, session_uuid, started_at, end
 -- ----------------------------------------------------------------------------
 -- 6. Вставка тестовых данных - Ответы в сессиях
 -- ----------------------------------------------------------------------------
+
+-- Очищаем таблицу перед вставкой (на случай повторного запуска)
+TRUNCATE TABLE session_answers;
+
+-- Вставляем ответы в сессии - по одному ответу на вопрос в сессии
 INSERT INTO session_answers (session_id, question_id, selected_answer_id, response_time_seconds, earned_points, is_correct)
-SELECT 
+SELECT
     gs.id AS session_id,
     q.id AS question_id,
-    a.id AS selected_answer_id,
+    (SELECT a.id FROM answers a 
+     WHERE a.question_id = q.id AND a.is_correct = TRUE 
+     LIMIT 1) AS selected_answer_id,
     FLOOR(10 + RAND() * 20) AS response_time_seconds,
     q.points AS earned_points,
     TRUE AS is_correct
 FROM game_sessions gs
-CROSS JOIN questions q
-JOIN answers a ON q.id = a.question_id AND a.is_correct = TRUE
+JOIN questions q ON q.category_id = gs.category_id
 WHERE gs.status = 'completed'
-  AND q.category_id = gs.category_id
+  AND q.id <= 16  -- Ограничиваем количество вопросов
+ORDER BY gs.id, q.id
 LIMIT 50;
 
 -- ----------------------------------------------------------------------------
