@@ -1,40 +1,23 @@
 # ============================================================================
 # Module 1: Docker Deployment Examples
 # ============================================================================
-# Примеры развёртывания MySQL и MariaDB при помощи Docker
+# Примеры развёртывания MariaDB (основной) и MySQL при помощи Docker
+# ============================================================================
+# ОСНОВНОЙ СЕРВЕР: MariaDB 10.11 LTS
+# ВЕБ-ИНТЕРФЕЙС: Adminer (порт 8081)
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# 1. Быстрый запуск MySQL
+# 1. Быстрый запуск MariaDB (основной)
 # ----------------------------------------------------------------------------
 
-# MySQL 8.0 - минимальная команда
-docker run --name mysql-quick \
-  -e MYSQL_ROOT_PASSWORD=root \
+# MariaDB 10.11 LTS - минимальная команда
+docker run --name mariadb-quick \
+  -e MARIADB_ROOT_PASSWORD=root \
   -p 3306:3306 \
-  -d mysql:8.0
+  -d mariadb:10.11
 
-# MySQL 8.0 с базой данных и пользователем
-docker run --name mysql-dev \
-  -e MYSQL_ROOT_PASSWORD=rootpassword \
-  -e MYSQL_DATABASE=library \
-  -e MYSQL_USER=librarian \
-  -e MYSQL_PASSWORD=librarian123 \
-  -p 3306:3306 \
-  -d mysql:8.0
-
-# MySQL 8.4 LTS
-docker run --name mysql-84 \
-  -e MYSQL_ROOT_PASSWORD=rootpassword \
-  -e MYSQL_DATABASE=quiz_db \
-  -p 3306:3306 \
-  -d mysql:8.4
-
-# ----------------------------------------------------------------------------
-# 2. Быстрый запуск MariaDB
-# ----------------------------------------------------------------------------
-
-# MariaDB 10.11 LTS
+# MariaDB 10.11 с базой данных и пользователем
 docker run --name mariadb-dev \
   -e MARIADB_ROOT_PASSWORD=rootpassword \
   -e MARIADB_DATABASE=library \
@@ -51,38 +34,58 @@ docker run --name mariadb-latest \
   -d mariadb:11.2
 
 # ----------------------------------------------------------------------------
+# 2. Быстрый запуск MySQL (альтернатива)
+# ----------------------------------------------------------------------------
+
+# MySQL 8.0
+docker run --name mysql-80 \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -e MYSQL_DATABASE=library \
+  -p 3307:3306 \
+  -d mysql:8.0
+
+# MySQL 8.4 LTS
+docker run --name mysql-84 \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -e MYSQL_DATABASE=quiz_db \
+  -p 3308:3306 \
+  -d mysql:8.4
+
+# ----------------------------------------------------------------------------
 # 3. Запуск с сохранением данных
 # ----------------------------------------------------------------------------
 
-# С именованным томом
-docker run --name mysql-persistent \
-  -e MYSQL_ROOT_PASSWORD=rootpassword \
-  -v mysql_data:/var/lib/mysql \
+# С именованным томом (рекомендуется для MariaDB)
+docker run --name mariadb-persistent \
+  -e MARIADB_ROOT_PASSWORD=rootpassword \
+  -v mariadb_data:/var/lib/mysql \
   -p 3306:3306 \
-  -d mysql:8.0
+  -d mariadb:10.11
 
 # С томом-папкой (замените путь на свой)
-docker run --name mysql-host-data \
-  -e MYSQL_ROOT_PASSWORD=rootpassword \
-  -v /home/gorynych/mysql-data:/var/lib/mysql \
+docker run --name mariadb-host-data \
+  -e MARIADB_ROOT_PASSWORD=rootpassword \
+  -v /home/gorynych/mariadb-data:/var/lib/mysql \
   -p 3306:3306 \
-  -d mysql:8.0
+  -d mariadb:10.11
 
 # ----------------------------------------------------------------------------
 # 4. Подключение к контейнеру
 # ----------------------------------------------------------------------------
 
-# Из хоста
-mysql -h 127.0.0.1 -P 3306 -u root -prootpassword
-mysql -h 127.0.0.1 -P 3306 -u librarian -plibrarian123 library
+# Из хоста (MariaDB)
+mariadb -h 127.0.0.1 -P 3306 -u root -prootpassword
+mariadb -h 127.0.0.1 -P 3306 -u librarian -plibrarian123 library
 
-# Из контейнера
-docker exec -it mysql-dev mysql -u root -prootpassword
-docker exec -it mysql-dev mysql -u librarian -plibrarian123 library
-
-# MariaDB
+# Из контейнера (MariaDB)
 docker exec -it mariadb-dev mariadb -u root -prootpassword
 docker exec -it mariadb-dev mariadb -u librarian -plibrarian123 library
+
+# MySQL (если запущен на порту 3307)
+mysql -h 127.0.0.1 -P 3307 -u root -prootpassword
+
+# Альтернативно: используйте mysql клиент для подключения к MariaDB
+mysql -h 127.0.0.1 -P 3306 -u root -prootpassword
 
 # ----------------------------------------------------------------------------
 # 5. Управление контейнером
@@ -93,45 +96,45 @@ docker ps
 docker ps -a
 
 # Статус конкретного контейнера
-docker inspect mysql-dev --format='{{.State.Status}}'
+docker inspect mariadb-dev --format='{{.State.Status}}'
 
 # Остановка
-docker stop mysql-dev
+docker stop mariadb-dev
 
 # Запуск
-docker start mysql-dev
+docker start mariadb-dev
 
 # Перезапуск
-docker restart mysql-dev
+docker restart mariadb-dev
 
 # Логи
-docker logs mysql-dev
-docker logs -f mysql-dev  # follow mode
+docker logs mariadb-dev
+docker logs -f mariadb-dev  # follow mode
 
 # Статистика ресурсов
-docker stats mysql-dev
+docker stats mariadb-dev
 
 # Удаление
-docker stop mysql-dev && docker rm mysql-dev
+docker stop mariadb-dev && docker rm mariadb-dev
 
 # ----------------------------------------------------------------------------
 # 6. Проверка версий и информации
 # ----------------------------------------------------------------------------
 
-# Версия MySQL
-docker exec -it mysql-dev mysql -u root -prootpassword -e "SELECT VERSION();"
-
 # Версия MariaDB
 docker exec -it mariadb-dev mariadb -u root -prootpassword -e "SELECT VERSION();"
 
+# Версия MySQL (если запущен)
+docker exec -it mysql-80 mysql -u root -prootpassword -e "SELECT VERSION();"
+
 # Информация о сервере
-docker exec -it mysql-dev mysql -u root -prootpassword -e "STATUS;"
+docker exec -it mariadb-dev mariadb -u root -prootpassword -e "STATUS;"
 
 # Список баз данных
-docker exec -it mysql-dev mysql -u root -prootpassword -e "SHOW DATABASES;"
+docker exec -it mariadb-dev mariadb -u root -prootpassword -e "SHOW DATABASES;"
 
 # Движки
-docker exec -it mysql-dev mysql -u root -prootpassword -e "SHOW ENGINES;"
+docker exec -it mariadb-dev mariadb -u root -prootpassword -e "SHOW ENGINES;"
 
 # Переменные
 docker exec -it mysql-dev mysql -u root -prootpassword \
@@ -141,57 +144,55 @@ docker exec -it mysql-dev mysql -u root -prootpassword \
 # 7. Docker Compose
 # ----------------------------------------------------------------------------
 
-# docker-compose.yml для разработки
+# docker-compose.yml для разработки (MariaDB + Adminer)
 # ---------------------------------
 # version: '3.8'
 #
 # services:
-#   mysql:
-#     image: mysql:8.0
-#     container_name: mysql-dev
+#   mariadb:
+#     image: mariadb:10.11
+#     container_name: mariadb-dev
 #     restart: unless-stopped
 #     environment:
-#       MYSQL_ROOT_PASSWORD: rootpassword
-#       MYSQL_DATABASE: library
-#       MYSQL_USER: librarian
-#       MYSQL_PASSWORD: librarian123
-#       MYSQL_ROOT_HOST: '%'
+#       MARIADB_ROOT_PASSWORD: rootpassword
+#       MARIADB_DATABASE: library
+#       MARIADB_USER: librarian
+#       MARIADB_PASSWORD: librarian123
+#       MARIADB_ROOT_HOST: '%'
 #     ports:
 #       - "3306:3306"
 #     volumes:
-#       - mysql_data:/var/lib/mysql
+#       - mariadb_data:/var/lib/mysql
 #       - ./init-scripts:/docker-entrypoint-initdb.d
 #     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 #     healthcheck:
-#       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+#       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
 #       interval: 10s
 #       timeout: 5s
 #       retries: 5
 #
-#   phpmyadmin:
-#     image: phpmyadmin:latest
-#     container_name: phpmyadmin-dev
+#   adminer:
+#     image: adminer:latest
+#     container_name: adminer-dev
 #     restart: unless-stopped
 #     environment:
-#       PMA_HOST: mysql
-#       PMA_PORT: 3306
-#       PMA_USER: root
-#       PMA_PASSWORD: rootpassword
+#       ADMINER_DEFAULT_SERVER: mariadb
+#       ADMINER_DESIGN: pepa-linha-dark
 #     ports:
-#       - "8080:80"
+#       - "8081:8080"
 #     depends_on:
-#       - mysql
+#       - mariadb
 #
 # volumes:
-#   mysql_data:
+#   mariadb_data:
 
 # Команды Docker Compose:
-docker-compose up -d           # Запуск
-docker-compose down            # Остановка
-docker-compose down -v         # Остановка с удалением томов
-docker-compose ps              # Статус
-docker-compose logs -f mysql   # Логи
-docker-compose exec mysql bash # Вход в контейнер
+docker-compose up -d              # Запуск
+docker-compose down               # Остановка
+docker-compose down -v            # Остановка с удалением томов
+docker-compose ps                 # Статус
+docker-compose logs -f mariadb    # Логи
+docker-compose exec mariadb bash  # Вход в контейнер
 
 # ----------------------------------------------------------------------------
 # 8. Инициализационные скрипты

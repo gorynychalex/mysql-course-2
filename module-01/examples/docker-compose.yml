@@ -1,44 +1,43 @@
 version: '3.8'
 
 # ============================================================================
-# Docker Compose для курса MySQL
+# Docker Compose для курса MySQL/MariaDB
 # ============================================================================
 # Использование:
 #   docker-compose up -d           # Запуск
 #   docker-compose down            # Остановка
 #   docker-compose logs -f         # Просмотр логов
-#   docker-compose exec mysql bash # Вход в контейнер
+#   docker-compose exec mariadb bash # Вход в контейнер
 # ============================================================================
 
 services:
   # --------------------------------------------------------------------------
-  # MySQL 8.0
+  # MariaDB 10.11 LTS (основной)
   # --------------------------------------------------------------------------
-  mysql:
-    image: mysql:8.0
-    container_name: mysql-course-dev
+  mariadb:
+    image: mariadb:10.11
+    container_name: mariadb-course-dev
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: library
-      MYSQL_USER: librarian
-      MYSQL_PASSWORD: librarian123
-      MYSQL_ROOT_HOST: '%'
+      MARIADB_ROOT_PASSWORD: rootpassword
+      MARIADB_DATABASE: library
+      MARIADB_USER: librarian
+      MARIADB_PASSWORD: librarian123
+      MARIADB_ROOT_HOST: '%'
     ports:
       - "3306:3306"
     volumes:
       # Сохранение данных
-      - mysql_data:/var/lib/mysql
-      # Инициализационные скрипты
-      - ./init-scripts:/docker-entrypoint-initdb.d
+      - mariadb_data:/var/lib/mysql
+      # Инициализационные скрипты (выполняются при первом запуске)
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
       # Кастомная конфигурация
       - ./my.cnf:/etc/mysql/conf.d/custom.cnf:ro
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
-      --default-authentication-plugin=mysql_native_password
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,29 +45,28 @@ services:
     networks:
       - course-network
     labels:
-      - "description=MySQL 8.0 для курса"
+      - "description=MariaDB 10.11 LTS для курса"
 
   # --------------------------------------------------------------------------
-  # MariaDB 10.11 LTS (альтернатива)
+  # MySQL 8.0 (альтернатива - раскомментируйте при необходимости)
   # --------------------------------------------------------------------------
-  # Раскомментируйте для использования MariaDB вместо MySQL
-  # mariadb:
-  #   image: mariadb:10.11
-  #   container_name: mariadb-course-dev
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: mysql-course-dev
   #   restart: unless-stopped
   #   environment:
-  #     MARIADB_ROOT_PASSWORD: rootpassword
-  #     MARIADB_DATABASE: library
-  #     MARIADB_USER: librarian
-  #     MARIADB_PASSWORD: librarian123
-  #     MARIADB_ROOT_HOST: '%'
+  #     MYSQL_ROOT_PASSWORD: rootpassword
+  #     MYSQL_DATABASE: library
+  #     MYSQL_USER: librarian
+  #     MYSQL_PASSWORD: librarian123
+  #     MYSQL_ROOT_HOST: '%'
   #   ports:
-  #     - "3307:3306"  # Другой порт чтобы не конфликтовать с MySQL
+  #     - "3307:3306"  # Другой порт чтобы не конфликтовать с MariaDB
   #   volumes:
-  #     - mariadb_data:/var/lib/mysql
-  #     - ./init-scripts:/docker-entrypoint-initdb.d
+  #     - mysql_data:/var/lib/mysql
+  #     - ./init-scripts:/docker-entrypoint-initdb.d:ro
   #   healthcheck:
-  #     test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
   #     interval: 10s
   #     timeout: 5s
   #     retries: 5
@@ -76,57 +74,56 @@ services:
   #     - course-network
 
   # --------------------------------------------------------------------------
-  # phpMyAdmin - веб-интерфейс для управления БД
-  # --------------------------------------------------------------------------
-  phpmyadmin:
-    image: phpmyadmin:latest
-    container_name: phpmyadmin-course-dev
-    restart: unless-stopped
-    environment:
-      PMA_HOST: mysql
-      PMA_PORT: 3306
-      PMA_USER: root
-      PMA_PASSWORD: rootpassword
-      PMA_ABSOLUTE_URI: http://localhost:8080/
-      APACHE_PORT: 80
-    ports:
-      - "8080:80"
-    depends_on:
-      mysql:
-        condition: service_healthy
-    networks:
-      - course-network
-    labels:
-      - "description=phpMyAdmin для управления БД"
-
-  # --------------------------------------------------------------------------
-  # Adminer - лёгкая альтернатива phpMyAdmin
+  # Adminer - веб-интерфейс для управления БД (лёгкая альтернатива phpMyAdmin)
   # --------------------------------------------------------------------------
   adminer:
     image: adminer:latest
     container_name: adminer-course-dev
     restart: unless-stopped
     environment:
-      ADMINER_DEFAULT_SERVER: mysql
+      ADMINER_DEFAULT_SERVER: mariadb
       ADMINER_DESIGN: pepa-linha-dark
+      ADMINER_SKIN: dark
     ports:
       - "8081:8080"
     depends_on:
-      - mysql
+      mariadb:
+        condition: service_healthy
     networks:
       - course-network
     labels:
-      - "description=Adminer - лёгкий веб-интерфейс"
+      - "description=Adminer - веб-интерфейс для управления БД"
+
+  # --------------------------------------------------------------------------
+  # phpMyAdmin (альтернатива Adminer - раскомментируйте при необходимости)
+  # --------------------------------------------------------------------------
+  # phpmyadmin:
+  #   image: phpmyadmin:latest
+  #   container_name: phpmyadmin-course-dev
+  #   restart: unless-stopped
+  #   environment:
+  #     PMA_HOST: mariadb
+  #     PMA_PORT: 3306
+  #     PMA_USER: root
+  #     PMA_PASSWORD: rootpassword
+  #     PMA_ABSOLUTE_URI: http://localhost:8080/
+  #   ports:
+  #     - "8080:80"
+  #   depends_on:
+  #     mariadb:
+  #       condition: service_healthy
+  #   networks:
+  #     - course-network
 
 # --------------------------------------------------------------------------
 # Тома для хранения данных
 # --------------------------------------------------------------------------
 volumes:
-  mysql_data:
+  mariadb_data:
     driver: local
     labels:
-      - "description=Данные MySQL"
-  # mariadb_data:
+      - "description=Данные MariaDB"
+  # mysql_data:
   #   driver: local
 
 # --------------------------------------------------------------------------
