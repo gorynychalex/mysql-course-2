@@ -73,40 +73,40 @@ DELIMITER ;
 DELIMITER //
 
 -- Простая процедура
-CREATE PROCEDURE get_book_by_id(IN book_id INT)
+CREATE PROCEDURE get_question_by_id(IN question_id INT)
 BEGIN
-    SELECT * FROM books WHERE id = book_id;
+    SELECT * FROM questions WHERE id = question_id;
 END//
 
 -- Процедура с несколькими запросами
-CREATE PROCEDURE get_reader_info(IN reader_id INT)
+CREATE PROCEDURE get_player_info(IN player_id INT)
 BEGIN
-    -- Информация о читателе
-    SELECT * FROM readers WHERE id = reader_id;
-    
-    -- Активные выдачи
-    SELECT * FROM loans 
-    WHERE reader_id = reader_id AND status = 'active';
-    
-    -- Штрафы
-    SELECT SUM(amount) AS total_fines 
-    FROM fines 
-    WHERE reader_id = reader_id AND status != 'paid';
+    -- Информация об игроке
+    SELECT * FROM players WHERE id = player_id;
+
+    -- Активные сессии
+    SELECT * FROM game_sessions
+    WHERE player_id = player_id AND status = 'in_progress';
+
+    -- Статистика
+    SELECT COUNT(*) AS total_games, SUM(score) AS total_score
+    FROM game_sessions
+    WHERE player_id = player_id;
 END//
 
 -- Процедура с OUT параметром
-CREATE PROCEDURE count_books_by_author(
-    IN author_id INT,
-    OUT book_count INT
+CREATE PROCEDURE count_questions_by_category(
+    IN category_id INT,
+    OUT question_count INT
 )
 BEGIN
-    SELECT COUNT(*) INTO book_count 
-    FROM book_authors 
-    WHERE author_id = author_id;
+    SELECT COUNT(*) INTO question_count
+    FROM questions
+    WHERE category_id = category_id;
 END//
 
 -- Вызов процедуры с OUT параметром
-CALL count_books_by_author(1, @count);
+CALL count_questions_by_category(1, @count);
 SELECT @count;
 
 DELIMITER ;
@@ -280,8 +280,8 @@ DELIMITER ;
 ```sql
 DELIMITER //
 
--- Функция расчёта возраста
-CREATE FUNCTION calculate_age(birth_date DATE)
+-- Функция расчёта возраста игрока
+CREATE FUNCTION calculate_player_age(birth_date DATE)
 RETURNS INT
 DETERMINISTIC
 BEGIN
@@ -290,44 +290,37 @@ BEGIN
     RETURN age;
 END//
 
--- Функция расчёта штрафа
-CREATE FUNCTION calculate_fine(
-    due_date DATE, 
-    return_date DATE
+-- Функция расчёта бонусных очков
+CREATE FUNCTION calculate_bonus(
+    base_score INT,
+    difficulty DECIMAL(3,1)
 )
-RETURNS DECIMAL(10,2)
+RETURNS INT
 DETERMINISTIC
 BEGIN
-    DECLARE days_overdue INT;
-    DECLARE fine_amount DECIMAL(10,2);
-    
-    SET days_overdue = DATEDIFF(return_date, due_date);
-    
-    IF days_overdue > 0 THEN
-        SET fine_amount = days_overdue * 10.00;
-    ELSE
-        SET fine_amount = 0.00;
-    END IF;
-    
-    RETURN fine_amount;
+    DECLARE bonus INT;
+
+    SET bonus = FLOOR(base_score * difficulty / 10);
+
+    RETURN bonus;
 END//
 
--- Функция форматирования имени
-CREATE FUNCTION format_name(
-    first_name VARCHAR(50),
-    last_name VARCHAR(50)
+-- Функция форматирования имени пользователя
+CREATE FUNCTION format_player_tag(
+    username VARCHAR(50),
+    level INT
 )
 RETURNS VARCHAR(100)
 DETERMINISTIC
 BEGIN
-    RETURN CONCAT(UPPER(last_name), ' ', INITCAP(first_name));
+    RETURN CONCAT(username, '[L', level, ']');
 END//
 
 DELIMITER ;
 
 -- Использование функций
-SELECT calculate_age('1990-05-15') AS age;
-SELECT calculate_fine('2024-01-01', '2024-01-10') AS fine;
+SELECT calculate_player_age('1990-05-15') AS age;
+SELECT calculate_bonus(1000, 5.0) AS bonus;
 ```
 
 ---
@@ -337,17 +330,17 @@ SELECT calculate_fine('2024-01-01', '2024-01-10') AS fine;
 ### IF в запросах
 
 ```sql
-SELECT 
-    title,
-    IF(price > 100, 'expensive', 'cheap') AS price_category,
-    IFNULL(description, 'No description') AS desc_display,
-    CASE 
-        WHEN status = 'available' THEN 'Доступна'
-        WHEN status = 'borrowed' THEN 'Выдана'
-        WHEN status = 'reserved' THEN 'Зарезервирована'
+SELECT
+    question_text,
+    IF(difficulty > 7.0, 'hard', 'easy') AS difficulty_category,
+    IFNULL(explanation, 'No explanation') AS explanation_display,
+    CASE
+        WHEN status = 'active' THEN 'Активен'
+        WHEN status = 'inactive' THEN 'Неактивен'
+        WHEN status = 'draft' THEN 'Черновик'
         ELSE 'Неизвестно'
     END AS status_russian
-FROM books;
+FROM questions;
 ```
 
 ### IF в процедурах
@@ -355,24 +348,25 @@ FROM books;
 ```sql
 DELIMITER //
 
-CREATE PROCEDURE check_book_availability(
-    IN book_id INT,
+CREATE PROCEDURE check_question_availability(
+    IN question_id INT,
     OUT is_available BOOLEAN,
     OUT message VARCHAR(255)
 )
 BEGIN
-    DECLARE available_copies INT;
-    
-    SELECT COUNT(*) INTO available_copies
-    FROM book_copies
-    WHERE book_id = book_id AND status = 'available';
-    
-    IF available_copies > 0 THEN
-        SET is_available = TRUE;
-        SET message = CONCAT('Доступно копий: ', available_copies);
-    ELSE
+    DECLARE active_sessions INT;
+
+    SELECT COUNT(*) INTO active_sessions
+    FROM game_sessions gs
+    JOIN session_answers sa ON gs.id = sa.session_id
+    WHERE sa.question_id = question_id AND gs.status = 'in_progress';
+
+    IF active_sessions > 0 THEN
         SET is_available = FALSE;
-        SET message = 'Книга недоступна';
+        SET message = CONCAT('Вопрос используется в сессиях: ', active_sessions);
+    ELSE
+        SET is_available = TRUE;
+        SET message = 'Вопрос доступен';
     END IF;
 END//
 
@@ -384,19 +378,19 @@ DELIMITER ;
 ```sql
 DELIMITER //
 
-CREATE PROCEDURE get_loan_status_description(
-    IN loan_id INT
+CREATE PROCEDURE get_session_status_description(
+    IN session_id INT
 )
 BEGIN
     DECLARE status VARCHAR(20);
-    
-    SELECT l.status INTO status FROM loans l WHERE l.id = loan_id;
-    
+
+    SELECT gs.status INTO status FROM game_sessions gs WHERE gs.id = session_id;
+
     SELECT CASE status
-        WHEN 'active' THEN 'Книга на руках'
-        WHEN 'returned' THEN 'Книга возвращена'
-        WHEN 'overdue' THEN 'Просрочено'
-        WHEN 'lost' THEN 'Книга утеряна'
+        WHEN 'in_progress' THEN 'Игра идет'
+        WHEN 'completed' THEN 'Игра завершена'
+        WHEN 'cancelled' THEN 'Игра отменена'
+        WHEN 'timeout' THEN 'Время вышло'
         ELSE 'Неизвестный статус'
     END AS status_description;
 END//
@@ -426,52 +420,52 @@ END;
 DELIMITER //
 
 -- Триггер перед вставкой (автоматическая дата)
-CREATE TRIGGER before_reader_insert
-BEFORE INSERT ON readers
+CREATE TRIGGER before_player_insert
+BEFORE INSERT ON players
 FOR EACH ROW
 BEGIN
-    IF NEW.registration_date IS NULL THEN
-        SET NEW.registration_date = CURDATE();
+    IF NEW.created_at IS NULL THEN
+        SET NEW.created_at = CURDATE();
     END IF;
 END//
 
 -- Триггер после вставки (логирование)
-CREATE TRIGGER after_loan_insert
-AFTER INSERT ON loans
+CREATE TRIGGER after_session_insert
+AFTER INSERT ON game_sessions
 FOR EACH ROW
 BEGIN
-    INSERT INTO loan_log (loan_id, action, action_date)
+    INSERT INTO session_log (session_id, action, action_date)
     VALUES (NEW.id, 'created', NOW());
-    
-    -- Обновление статуса копии
-    UPDATE book_copies SET status = 'borrowed' WHERE id = NEW.copy_id;
+
+    -- Обновление статистики игрока
+    UPDATE players SET games_played = games_played + 1 WHERE id = NEW.player_id;
 END//
 
 -- Триггер перед обновлением (проверка)
-CREATE TRIGGER before_loan_update
-BEFORE UPDATE ON loans
+CREATE TRIGGER before_session_update
+BEFORE UPDATE ON game_sessions
 FOR EACH ROW
 BEGIN
-    -- Нельзя изменить дату выдачи после создания
-    SET NEW.loan_date = OLD.loan_date;
-    
-    -- Если возвращена, установить дату возврата
-    IF NEW.status = 'returned' AND OLD.status != 'returned' THEN
-        IF NEW.return_date IS NULL THEN
-            SET NEW.return_date = CURDATE();
+    -- Нельзя изменить дату начала после создания
+    SET NEW.started_at = OLD.started_at;
+
+    -- Если завершена, установить дату завершения
+    IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
+        IF NEW.completed_at IS NULL THEN
+            SET NEW.completed_at = CURDATE();
         END IF;
     END IF;
 END//
 
 -- Триггер после удаления (каскадное логирование)
-CREATE TRIGGER after_reader_delete
-AFTER DELETE ON readers
+CREATE TRIGGER after_player_delete
+AFTER DELETE ON players
 FOR EACH ROW
 BEGIN
-    INSERT INTO reader_archive (
-        reader_id, first_name, last_name, archived_at
+    INSERT INTO player_archive (
+        player_id, username, email, archived_at
     ) VALUES (
-        OLD.id, OLD.first_name, OLD.last_name, NOW()
+        OLD.id, OLD.username, OLD.email, NOW()
     );
 END//
 

@@ -54,12 +54,12 @@ ROLLBACK; -- Не отменит CREATE TABLE
 CREATE DATABASE database_name;
 
 -- С указанием кодировки
-CREATE DATABASE library_db
+CREATE DATABASE quiz_db
     CHARACTER SET utf8mb4
     COLLATE utf8mb4_unicode_ci;
 
 -- Если база не существует
-CREATE DATABASE IF NOT EXISTS library_db
+CREATE DATABASE IF NOT EXISTS quiz_db
     CHARACTER SET utf8mb4
     COLLATE utf8mb4_unicode_ci;
 ```
@@ -92,10 +92,10 @@ COLLATE utf8mb4_en_0900_ai_ci -- Английский
 SHOW DATABASES;
 
 -- Показать создание базы
-SHOW CREATE DATABASE library_db;
+SHOW CREATE DATABASE quiz_db;
 
 -- Использовать базу
-USE library_db;
+USE quiz_db;
 
 -- Текущая база
 SELECT DATABASE();
@@ -129,40 +129,39 @@ CREATE TABLE table_name (
 ### Пример создания таблицы
 
 ```sql
-CREATE TABLE books (
+CREATE TABLE questions (
     -- Первичный ключ
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    
+
     -- Обязательные поля
-    title VARCHAR(255) NOT NULL,
-    isbn CHAR(13) NOT NULL UNIQUE,
-    
+    question_text VARCHAR(500) NOT NULL,
+    category_id INT UNSIGNED NOT NULL,
+
     -- Необязательные поля
-    author VARCHAR(100),
-    description TEXT,
-    pages_count INT UNSIGNED,
-    
+    question_type VARCHAR(50),
+    explanation TEXT,
+
     -- Числовые поля
-    price DECIMAL(10,2) DEFAULT 0.00,
-    quantity INT UNSIGNED DEFAULT 0,
-    
+    points INT UNSIGNED DEFAULT 1,
+    difficulty DECIMAL(3,1) DEFAULT 1.0,
+
     -- Дата и время
-    published_year YEAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
     -- Статусы
-    status ENUM('available', 'borrowed', 'reserved', 'lost') DEFAULT 'available',
-    is_active BOOLEAN DEFAULT TRUE,
-    
+    status ENUM('active', 'inactive', 'draft', 'archived') DEFAULT 'active',
+    is_published BOOLEAN DEFAULT FALSE,
+
     -- Индексы
-    INDEX idx_title (title),
-    INDEX idx_author (author),
+    INDEX idx_question_text (question_text),
+    INDEX idx_category (category_id),
     INDEX idx_status (status),
-    FULLTEXT INDEX ft_description (description)
-    
+    INDEX idx_difficulty (difficulty),
+    FULLTEXT INDEX ft_question_text (question_text)
+
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='Таблица книг библиотеки';
+  COMMENT='Таблица вопросов викторины';
 ```
 
 ### Ограничения столбцов (Constraints)
@@ -223,20 +222,19 @@ DROP TEMPORARY TABLE IF EXISTS temp_results;
 
 ```sql
 -- Создание временной таблицы с результатами
-CREATE TEMPORARY TABLE reader_stats AS
-SELECT 
-    r.id,
-    r.first_name,
-    r.last_name,
-    COUNT(l.id) AS loans_count,
-    SUM(f.amount) AS total_fines
-FROM readers r
-LEFT JOIN loans l ON r.id = l.reader_id
-LEFT JOIN fines f ON r.id = f.reader_id
-GROUP BY r.id;
+CREATE TEMPORARY TABLE player_stats AS
+SELECT
+    p.id,
+    p.username,
+    p.email,
+    COUNT(gs.id) AS games_count,
+    SUM(gs.score) AS total_score
+FROM players p
+LEFT JOIN game_sessions gs ON p.id = gs.player_id
+GROUP BY p.id;
 
 -- Использование
-SELECT * FROM reader_stats WHERE loans_count > 5;
+SELECT * FROM player_stats WHERE games_count > 5;
 
 -- Таблица удалится автоматически
 ```
@@ -271,49 +269,49 @@ SELECT * FROM reader_stats WHERE loans_count > 5;
 
 ```sql
 -- При создании таблицы
-CREATE TABLE readers (
+CREATE TABLE players (
     id INT PRIMARY KEY,
     email VARCHAR(100) UNIQUE,
-    last_name VARCHAR(50),
-    first_name VARCHAR(50),
-    phone VARCHAR(20),
-    
-    INDEX idx_name (last_name, first_name),
-    INDEX idx_phone (phone)
+    username VARCHAR(50),
+    total_score INT,
+    games_played INT,
+
+    INDEX idx_username (username),
+    INDEX idx_score (total_score)
 );
 
 -- Добавление индекса после создания
-CREATE INDEX idx_email ON readers(email);
+CREATE INDEX idx_email ON players(email);
 
 -- Уникальный индекс
-CREATE UNIQUE INDEX idx_unique_email ON readers(email);
+CREATE UNIQUE INDEX idx_unique_email ON players(email);
 
 -- Составной индекс
-CREATE INDEX idx_full_name ON readers(last_name, first_name);
+CREATE INDEX idx_player_stats ON players(username, total_score);
 ```
 
 ### Просмотр индексов
 
 ```sql
 -- Показать индексы таблицы
-SHOW INDEX FROM readers;
+SHOW INDEX FROM players;
 
 -- Альтернатива
-SHOW INDEXES FROM readers;
-SHOW KEYS FROM readers;
+SHOW INDEXES FROM players;
+SHOW KEYS FROM players;
 ```
 
 ### Удаление индексов
 
 ```sql
 -- Удаление по имени
-DROP INDEX idx_email ON readers;
+DROP INDEX idx_email ON players;
 
 -- Через ALTER TABLE
-ALTER TABLE readers DROP INDEX idx_email;
+ALTER TABLE players DROP INDEX idx_email;
 
 -- Удаление PRIMARY KEY
-ALTER TABLE readers DROP PRIMARY KEY;
+ALTER TABLE players DROP PRIMARY KEY;
 ```
 
 ### Когда создавать индексы
@@ -342,48 +340,48 @@ ALTER TABLE readers DROP PRIMARY KEY;
 
 ```sql
 -- При создании таблицы
-CREATE TABLE articles (
+CREATE TABLE questions (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    title VARCHAR(255),
-    body TEXT,
-    FULLTEXT INDEX ft_title_body (title, body)
+    question_text VARCHAR(500),
+    explanation TEXT,
+    FULLTEXT INDEX ft_question_explanation (question_text, explanation)
 ) ENGINE=InnoDB;
 
 -- Добавление к существующей таблице
-ALTER TABLE articles ADD FULLTEXT INDEX ft_body (body);
+ALTER TABLE questions ADD FULLTEXT INDEX ft_explanation (explanation);
 ```
 
 ### Режимы полнотекстового поиска
 
 ```sql
 -- Естественный язык (по умолчанию)
-SELECT * FROM articles
-WHERE MATCH(title, body) AGAINST('библиотека книга' IN NATURAL LANGUAGE MODE);
+SELECT * FROM questions
+WHERE MATCH(question_text, explanation) AGAINST('история война' IN NATURAL LANGUAGE MODE);
 
 -- С расширением (слова с * )
-SELECT * FROM articles
-WHERE MATCH(title, body) AGAINST('библио*' IN BOOLEAN MODE);
+SELECT * FROM questions
+WHERE MATCH(question_text, explanation) AGAINST('истори*' IN BOOLEAN MODE);
 
 -- Точная фраза
-SELECT * FROM articles
-WHERE MATCH(title, body) AGAINST('"научная фантастика"' IN BOOLEAN MODE);
+SELECT * FROM questions
+WHERE MATCH(question_text, explanation) AGAINST('"великая отечественная"' IN BOOLEAN MODE);
 
 -- Исключение слов
-SELECT * FROM articles
-WHERE MATCH(title, body) AGAINST('+библиотека -учебная' IN BOOLEAN MODE);
+SELECT * FROM questions
+WHERE MATCH(question_text, explanation) AGAINST('+история -древняя' IN BOOLEAN MODE);
 ```
 
 ### Операторы BOOLEAN MODE
 
 | Оператор | Описание | Пример |
 |----------|----------|--------|
-| **+** | Слово должно присутствовать | +библиотека |
-| **-** | Слово должно отсутствовать | -учебная |
-| **\*** | Подстановочный знак | библио* |
-| **"** | Точная фраза | "научная фантастика" |
+| **+** | Слово должно присутствовать | +история |
+| **-** | Слово должно отсутствовать | -древняя |
+| **\*** | Подстановочный знак | истори* |
+| **"** | Точная фраза | "великая отечественная" |
 | **>** | Повысить релевантность | >важное |
 | **<** | Понизить релевантность | <менееважное |
-| **()** | Группировка | +(библиотека книга) |
+| **()** | Группировка | +(история война) |
 
 ### Настройки полнотекстового поиска
 
@@ -411,98 +409,98 @@ SHOW VARIABLES LIKE 'innodb_ft_min_token_size';
 
 ```sql
 -- Добавить столбец в конец
-ALTER TABLE books ADD COLUMN publisher VARCHAR(100);
+ALTER TABLE questions ADD COLUMN explanation TEXT;
 
 -- Добавить столбец в начало
-ALTER TABLE books ADD COLUMN id INT FIRST;
+ALTER TABLE questions ADD COLUMN id INT FIRST;
 
 -- Добавить столбец после другого
-ALTER TABLE books ADD COLUMN isbn CHAR(13) AFTER title;
+ALTER TABLE questions ADD COLUMN category_id INT AFTER id;
 
 -- Добавить столбец с ограничениями
-ALTER TABLE books ADD COLUMN rating DECIMAL(3,2) DEFAULT 0.00 CHECK (rating >= 0 AND rating <= 5);
+ALTER TABLE questions ADD COLUMN difficulty DECIMAL(3,2) DEFAULT 1.00 CHECK (difficulty >= 0 AND difficulty <= 10);
 ```
 
 ### Изменение столбца
 
 ```sql
 -- Изменить тип данных
-ALTER TABLE books MODIFY COLUMN title VARCHAR(500);
+ALTER TABLE questions MODIFY COLUMN question_text VARCHAR(1000);
 
 -- Изменить имя и тип
-ALTER TABLE books CHANGE COLUMN title book_title VARCHAR(500);
+ALTER TABLE questions CHANGE COLUMN question_text text_content VARCHAR(1000);
 
 -- Добавить NOT NULL
-ALTER TABLE books MODIFY COLUMN author VARCHAR(100) NOT NULL;
+ALTER TABLE questions MODIFY COLUMN category_id INT NOT NULL;
 
 -- Удалить NOT NULL
-ALTER TABLE books MODIFY COLUMN author VARCHAR(100) NULL;
+ALTER TABLE questions MODIFY COLUMN explanation TEXT NULL;
 
 -- Изменить значение по умолчанию
-ALTER TABLE books MODIFY COLUMN status ENUM('available', 'borrowed') DEFAULT 'available';
+ALTER TABLE questions MODIFY COLUMN status ENUM('active', 'inactive') DEFAULT 'active';
 ```
 
 ### Удаление столбца
 
 ```sql
-ALTER TABLE books DROP COLUMN publisher;
+ALTER TABLE questions DROP COLUMN explanation;
 ```
 
 ### Добавление ограничений
 
 ```sql
 -- Первичный ключ
-ALTER TABLE books ADD PRIMARY KEY (id);
+ALTER TABLE questions ADD PRIMARY KEY (id);
 
 -- Уникальный ключ
-ALTER TABLE books ADD UNIQUE KEY unique_isbn (isbn);
+ALTER TABLE questions ADD UNIQUE KEY unique_slug (slug);
 
 -- Внешний ключ
-ALTER TABLE loans ADD CONSTRAINT fk_book
-    FOREIGN KEY (book_id) REFERENCES books(id);
+ALTER TABLE session_answers ADD CONSTRAINT fk_question
+    FOREIGN KEY (question_id) REFERENCES questions(id);
 
 -- Индекс
-ALTER TABLE books ADD INDEX idx_title (title);
+ALTER TABLE questions ADD INDEX idx_question_text (question_text);
 ```
 
 ### Удаление ограничений
 
 ```sql
 -- Первичный ключ
-ALTER TABLE books DROP PRIMARY KEY;
+ALTER TABLE questions DROP PRIMARY KEY;
 
 -- Уникальный ключ
-ALTER TABLE books DROP INDEX unique_isbn;
+ALTER TABLE questions DROP INDEX unique_slug;
 
 -- Внешний ключ
-ALTER TABLE loans DROP FOREIGN KEY fk_book;
+ALTER TABLE session_answers DROP FOREIGN KEY fk_question;
 
 -- Индекс
-ALTER TABLE books DROP INDEX idx_title;
+ALTER TABLE questions DROP INDEX idx_question_text;
 ```
 
 ### Переименование таблицы
 
 ```sql
 -- Переименовать таблицу
-ALTER TABLE books RENAME TO book_catalog;
+ALTER TABLE questions RENAME TO question_bank;
 
 -- Несколько таблиц
-ALTER TABLE old_name1 RENAME TO new_name1,
-             old_name2 RENAME TO new_name2;
+ALTER TABLE old_questions RENAME TO archived_questions,
+             old_answers RENAME TO archived_answers;
 ```
 
 ### Изменение движка и кодировки
 
 ```sql
 -- Изменить движок
-ALTER TABLE books ENGINE=MyISAM;
+ALTER TABLE questions ENGINE=MyISAM;
 
 -- Изменить кодировку
-ALTER TABLE books CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE questions CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- Изменить кодировку столбца
-ALTER TABLE books MODIFY title VARCHAR(255) CHARACTER SET utf8mb4;
+ALTER TABLE questions MODIFY question_text VARCHAR(500) CHARACTER SET utf8mb4;
 ```
 
 ---

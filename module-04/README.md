@@ -31,18 +31,18 @@
 ### Пример CRUD операций
 
 ```sql
--- CREATE: Вставка новой книги
-INSERT INTO books (title, author, year) 
-VALUES ('Война и мир', 'Л.Н. Толстой', 1869);
+-- CREATE: Вставка нового вопроса
+INSERT INTO questions (question_text, category_id, difficulty)
+VALUES ('Столица России?', 1, 1.0);
 
--- READ: Выборка книг
-SELECT * FROM books WHERE author = 'Л.Н. Толстой';
+-- READ: Выборка вопросов
+SELECT * FROM questions WHERE category_id = 1;
 
--- UPDATE: Обновление книги
-UPDATE books SET year = 1870 WHERE title = 'Война и мир';
+-- UPDATE: Обновление вопроса
+UPDATE questions SET difficulty = 2.0 WHERE question_text = 'Столица России?';
 
--- DELETE: Удаление книги
-DELETE FROM books WHERE id = 1;
+-- DELETE: Удаление вопроса
+DELETE FROM questions WHERE id = 1;
 ```
 
 ---
@@ -68,29 +68,29 @@ VALUES
 
 ```sql
 -- Вставка с указанием всех столбцов
-INSERT INTO readers (id, first_name, last_name, email, phone, registration_date)
-VALUES (1, 'Иван', 'Петров', 'ivan@example.com', '+7-900-123-4567', '2024-01-15');
+INSERT INTO players (id, username, email, total_score, games_played)
+VALUES (1, 'ivan_gamer', 'ivan@example.com', 0, 0);
 
 -- Вставка без указания столбцов с DEFAULT
-INSERT INTO readers VALUES (DEFAULT, 'Петр', 'Иванов', 'petr@example.com', 
-                           '+7-900-765-4321', CURDATE());
+INSERT INTO players VALUES (DEFAULT, 'petr_player', 'petr@example.com',
+                           0, 0, CURDATE());
 
--- Вставка нескольких читателей
-INSERT INTO readers (first_name, last_name, email, registration_date) VALUES
-    ('Анна', 'Сидорова', 'anna@example.com', '2024-01-16'),
-    ('Ольга', 'Кузнецова', 'olga@example.com', '2024-01-17'),
-    ('Дмитрий', 'Попов', 'dmitry@example.com', '2024-01-18');
+-- Вставка нескольких игроков
+INSERT INTO players (username, email, total_score) VALUES
+    ('anna_quiz', 'anna@example.com', 0),
+    ('olga_master', 'olga@example.com', 0),
+    ('dmitry_pro', 'dmitry@example.com', 0);
 
 -- Вставка с игнорированием ошибок
-INSERT IGNORE INTO readers (email, first_name, last_name) 
-VALUES ('ivan@example.com', 'Иван', 'Новиков');
+INSERT IGNORE INTO players (email, username)
+VALUES ('ivan@example.com', 'ivan_new');
 
 -- Вставка с обновлением при конфликте
-INSERT INTO readers (email, first_name, last_name)
-VALUES ('ivan@example.com', 'Иван', 'Новиков')
-ON DUPLICATE KEY UPDATE 
-    first_name = 'Иван',
-    last_name = 'Новиков',
+INSERT INTO players (email, username, total_score)
+VALUES ('ivan@example.com', 'ivan_new', 100)
+ON DUPLICATE KEY UPDATE
+    username = 'ivan_new',
+    total_score = total_score + 100,
     updated_at = CURRENT_TIMESTAMP;
 ```
 
@@ -98,16 +98,16 @@ ON DUPLICATE KEY UPDATE
 
 ```sql
 -- Копирование данных из одной таблицы в другую
-INSERT INTO readers_archive (id, first_name, last_name, email)
-SELECT id, first_name, last_name, email
-FROM readers
+INSERT INTO players_archive (id, username, email, total_score)
+SELECT id, username, email, total_score
+FROM players
 WHERE is_active = FALSE;
 
 -- Вставка с вычисляемыми значениями
-INSERT INTO reader_stats (reader_id, total_loans, last_visit)
+INSERT INTO player_stats (player_id, total_games, last_played)
 SELECT id, 0, NOW()
-FROM readers
-WHERE registration_date >= '2024-01-01';
+FROM players
+WHERE created_at >= '2024-01-01';
 ```
 
 ---
@@ -129,50 +129,54 @@ IGNORE 1 ROWS;
 
 ```sql
 -- Загрузка из CSV файла
-LOAD DATA LOCAL INFILE '/path/to/readers.csv'
-INTO TABLE readers
-FIELDS TERMINATED BY ',' 
+LOAD DATA LOCAL INFILE '/path/to/players.csv'
+INTO TABLE players
+FIELDS TERMINATED BY ','
 ENCLOSED BY '"'
 LINES TERMINATED BY '\n'
 IGNORE 1 ROWS
-(first_name, last_name, email, phone, @reg_date)
-SET registration_date = STR_TO_DATE(@reg_date, '%d.%m.%Y');
+(username, email, @score_str, @games_str, @created_str)
+SET
+    total_score = CAST(@score_str AS UNSIGNED),
+    games_played = CAST(@games_str AS UNSIGNED),
+    created_at = STR_TO_DATE(@created_str, '%d.%m.%Y');
 
 -- Загрузка с указанием столбцов
-LOAD DATA LOCAL INFILE '/path/to/books.csv'
-INTO TABLE books
+LOAD DATA LOCAL INFILE '/path/to/questions.csv'
+INTO TABLE questions
 FIELDS TERMINATED BY ';'
-(title, @year_str, author, @price_str)
-SET 
-    publication_year = CAST(@year_str AS UNSIGNED),
-    price = CAST(REPLACE(@price_str, '₽', '') AS DECIMAL(10,2));
+(category_id, @question_text, @difficulty_str, @points_str)
+SET
+    question_text = @question_text,
+    difficulty = CAST(@difficulty_str AS DECIMAL(3,1)),
+    points = CAST(@points_str AS UNSIGNED);
 ```
 
 ### Формат CSV файла
 
 ```csv
-first_name,last_name,email,phone,registration_date
-Иван,Петров,ivan@example.com,+7-900-123-4567,15.01.2024
-Петр,Сидоров,petr@example.com,+7-900-765-4321,16.01.2024
+username,email,total_score,games_played,created_at
+ivan_gamer,ivan@example.com,100,5,15.01.2024
+petr_player,petr@example.com,200,10,16.01.2024
 ```
 
 ### Экспорт данных в файл
 
 ```sql
 -- Выгрузка в CSV
-SELECT first_name, last_name, email
-INTO OUTFILE '/tmp/readers_export.csv'
-FIELDS TERMINATED BY ',' 
+SELECT username, email, total_score
+INTO OUTFILE '/tmp/players_export.csv'
+FIELDS TERMINATED BY ','
 ENCLOSED BY '"'
 LINES TERMINATED BY '\n'
-FROM readers;
+FROM players;
 
 -- Выгрузка с заголовками
-(SELECT 'first_name', 'last_name', 'email')
+(SELECT 'username', 'email', 'total_score')
 UNION ALL
-(SELECT first_name, last_name, email FROM readers)
-INTO OUTFILE '/tmp/readers_with_headers.csv'
-FIELDS TERMINATED BY ',' 
+(SELECT username, email, total_score FROM players)
+INTO OUTFILE '/tmp/players_with_headers.csv'
+FIELDS TERMINATED BY ','
 ENCLOSED BY '"'
 LINES TERMINATED BY '\n';
 ```
@@ -200,42 +204,41 @@ WHERE t2.condition;
 
 ```sql
 -- Простое обновление
-UPDATE books 
-SET price = price * 1.1 
-WHERE publication_year < 2000;
+UPDATE questions
+SET points = points * 2
+WHERE difficulty > 5.0;
 
 -- Обновление нескольких столбцов
-UPDATE readers 
-SET 
+UPDATE players
+SET
     is_active = TRUE,
     is_blocked = FALSE,
     block_reason = NULL,
     updated_at = CURRENT_TIMESTAMP
-WHERE reader_card_number = 'R001';
+WHERE username = 'ivan_gamer';
 
 -- Обновление с подзапросом
-UPDATE books 
-SET rating = (
-    SELECT AVG(rating) 
-    FROM reviews 
-    WHERE reviews.book_id = books.id
+UPDATE questions
+SET difficulty = (
+    SELECT AVG(difficulty)
+    FROM questions q2
+    WHERE q2.category_id = questions.category_id
 )
-WHERE id IN (SELECT book_id FROM reviews);
+WHERE id IN (SELECT id FROM questions WHERE category_id = 1);
 
 -- Обновление с JOIN
-UPDATE loans l
-JOIN book_copies bc ON l.copy_id = bc.id
-SET l.status = 'overdue'
-WHERE l.due_date < CURDATE() 
-  AND l.status = 'active'
-  AND bc.status = 'borrowed';
+UPDATE game_sessions gs
+JOIN players p ON gs.player_id = p.id
+SET gs.status = 'completed'
+WHERE p.username = 'ivan_gamer'
+  AND gs.status = 'in_progress';
 
 -- Обновление с CASE
-UPDATE books
+UPDATE questions
 SET status = CASE
-    WHEN publication_year < 1950 THEN 'archived'
-    WHEN publication_year < 2000 THEN 'inactive'
-    ELSE 'active'
+    WHEN difficulty < 3.0 THEN 'easy'
+    WHEN difficulty < 7.0 THEN 'medium'
+    ELSE 'hard'
 END;
 ```
 
@@ -266,22 +269,22 @@ LIMIT 10;
 
 ```sql
 -- Удаление по условию
-DELETE FROM fines 
-WHERE status = 'paid' 
-  AND paid_date < DATE_SUB(CURDATE(), INTERVAL 3 YEAR);
+DELETE FROM session_answers
+WHERE is_correct = FALSE
+  AND created_at < DATE_SUB(CURDATE(), INTERVAL 3 YEAR);
 
 -- Удаление с JOIN
-DELETE l, f
-FROM loans l
-LEFT JOIN fines f ON l.id = f.loan_id
-WHERE l.reader_id = 1 
-  AND l.status = 'returned';
+DELETE gs, sa
+FROM game_sessions gs
+LEFT JOIN session_answers sa ON gs.id = sa.session_id
+WHERE gs.player_id = 1
+  AND gs.status = 'completed';
 
 -- Удаление дубликатов
-DELETE t1 FROM readers t1
-INNER JOIN readers t2 
-WHERE t1.id > t2.id 
-  AND t1.email = t2.email;
+DELETE p1 FROM players p1
+INNER JOIN players p2
+WHERE p1.id > p2.id
+  AND p1.email = p2.email;
 ```
 
 ### DELETE vs TRUNCATE
@@ -319,38 +322,38 @@ LIMIT offset, count;
 
 ```sql
 -- Выборка всех столбцов
-SELECT * FROM books;
+SELECT * FROM questions;
 
 -- Выборка конкретных столбцов
-SELECT title, author, price FROM books;
+SELECT question_text, difficulty, points FROM questions;
 
 -- Выборка с псевдонимами
-SELECT 
-    title AS "Название",
-    author AS "Автор",
-    price AS "Цена, ₽"
-FROM books;
+SELECT
+    question_text AS "Вопрос",
+    difficulty AS "Сложность",
+    points AS "Очки"
+FROM questions;
 
 -- DISTINCT - уникальные значения
-SELECT DISTINCT author FROM books;
+SELECT DISTINCT category_id FROM questions;
 
 -- Выборка с вычислениями
-SELECT 
-    title,
-    price,
-    price * 0.8 AS discounted_price
-FROM books;
+SELECT
+    question_text,
+    points,
+    points * 1.5 AS bonus_points
+FROM questions;
 
 -- Выборка с функциями
-SELECT 
-    author,
-    COUNT(*) AS book_count,
-    AVG(price) AS avg_price,
-    MAX(publication_year) AS latest_year
-FROM books
-GROUP BY author
-HAVING book_count > 1
-ORDER BY book_count DESC;
+SELECT
+    category_id,
+    COUNT(*) AS question_count,
+    AVG(difficulty) AS avg_difficulty,
+    MAX(points) AS max_points
+FROM questions
+GROUP BY category_id
+HAVING question_count > 1
+ORDER BY question_count DESC;
 ```
 
 ---
@@ -361,70 +364,70 @@ ORDER BY book_count DESC;
 
 ```sql
 -- Равенство и неравенство
-SELECT * FROM books WHERE price = 100;
-SELECT * FROM books WHERE price != 100;
-SELECT * FROM books WHERE price <> 100;
+SELECT * FROM questions WHERE points = 10;
+SELECT * FROM questions WHERE points != 10;
+SELECT * FROM questions WHERE points <> 10;
 
 -- Сравнение с диапазоном
-SELECT * FROM books WHERE price BETWEEN 100 AND 500;
-SELECT * FROM books WHERE price NOT BETWEEN 100 AND 500;
+SELECT * FROM questions WHERE difficulty BETWEEN 1 AND 5;
+SELECT * FROM questions WHERE difficulty NOT BETWEEN 1 AND 5;
 
 -- Сравнение со списком
-SELECT * FROM books WHERE status IN ('available', 'reserved');
-SELECT * FROM books WHERE status NOT IN ('lost', 'written_off');
+SELECT * FROM questions WHERE status IN ('active', 'draft');
+SELECT * FROM questions WHERE status NOT IN ('archived', 'deleted');
 
 -- Сравнение с NULL
-SELECT * FROM readers WHERE phone IS NULL;
-SELECT * FROM readers WHERE phone IS NOT NULL;
+SELECT * FROM players WHERE email IS NULL;
+SELECT * FROM players WHERE email IS NOT NULL;
 
 -- Сравнение с шаблоном (LIKE)
-SELECT * FROM books WHERE title LIKE 'Война%';
-SELECT * FROM books WHERE title LIKE '%мир%';
-SELECT * FROM books WHERE title LIKE '_ойна';
-SELECT * FROM books WHERE isbn LIKE '978-_-___-___-_'
+SELECT * FROM questions WHERE question_text LIKE 'Что%';
+SELECT * FROM questions WHERE question_text LIKE '%столица%';
+SELECT * FROM questions WHERE question_text LIKE '_то%';
+SELECT * FROM questions WHERE slug LIKE 'hist_-_';
 
 -- Регулярные выражения (REGEXP)
-SELECT * FROM books WHERE title REGEXP '^[А-Я]';
-SELECT * FROM readers WHERE email REGEXP '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$';
+SELECT * FROM questions WHERE question_text REGEXP '^[А-Я]';
+SELECT * FROM players WHERE email REGEXP '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$';
 ```
 
 ### Логические операторы
 
 ```sql
 -- AND
-SELECT * FROM books 
-WHERE price > 100 AND publication_year > 2000;
+SELECT * FROM questions
+WHERE points > 5 AND difficulty > 5.0;
 
 -- OR
-SELECT * FROM books 
-WHERE status = 'available' OR status = 'reserved';
+SELECT * FROM questions
+WHERE status = 'active' OR status = 'draft';
 
 -- NOT
-SELECT * FROM books 
-WHERE NOT status = 'lost';
+SELECT * FROM questions
+WHERE NOT status = 'archived';
 
 -- Комбинация
-SELECT * FROM books 
-WHERE (price > 100 AND publication_year > 2000) 
-   OR status = 'new';
+SELECT * FROM questions
+WHERE (points > 5 AND difficulty > 5.0)
+   OR status = 'featured';
 ```
 
 ### EXISTS и NOT EXISTS
 
 ```sql
 -- EXISTS - проверка существования
-SELECT * FROM readers r
+SELECT * FROM categories c
 WHERE EXISTS (
-    SELECT 1 FROM loans l 
-    WHERE l.reader_id = r.id 
-    AND l.status = 'active'
+    SELECT 1 FROM questions q
+    WHERE q.category_id = c.id
+    AND q.status = 'active'
 );
 
 -- NOT EXISTS
-SELECT * FROM readers r
+SELECT * FROM categories c
 WHERE NOT EXISTS (
-    SELECT 1 FROM loans l 
-    WHERE l.reader_id = r.id
+    SELECT 1 FROM questions q
+    WHERE q.category_id = c.id
 );
 ```
 
@@ -447,53 +450,52 @@ WHERE NOT EXISTS (
 
 ```sql
 -- INNER JOIN (внутреннее соединение)
-SELECT 
-    b.title,
-    a.first_name,
-    a.last_name
-FROM books b
-INNER JOIN book_authors ba ON b.id = ba.book_id
-INNER JOIN authors a ON ba.author_id = a.id;
+SELECT
+    q.question_text,
+    c.name AS category_name,
+    c.slug
+FROM questions q
+INNER JOIN categories c ON q.category_id = c.id;
 
 -- LEFT JOIN (левое соединение)
-SELECT 
-    r.first_name,
-    r.last_name,
-    l.loan_date,
-    l.due_date
-FROM readers r
-LEFT JOIN loans l ON r.id = l.reader_id AND l.status = 'active';
+SELECT
+    p.username,
+    p.email,
+    gs.score,
+    gs.status
+FROM players p
+LEFT JOIN game_sessions gs ON p.id = gs.player_id AND gs.status = 'in_progress';
 
 -- RIGHT JOIN (правое соединение)
-SELECT 
-    b.title,
-    bc.inventory_number
-FROM books b
-RIGHT JOIN book_copies bc ON b.id = bc.book_id;
+SELECT
+    c.name,
+    q.question_text
+FROM categories c
+RIGHT JOIN questions q ON c.id = q.category_id;
 
 -- Множественное соединение
-SELECT 
-    r.first_name,
-    r.last_name,
-    b.title,
-    bc.inventory_number,
-    l.loan_date,
-    l.due_date
-FROM loans l
-JOIN readers r ON l.reader_id = r.id
-JOIN book_copies bc ON l.copy_id = bc.id
-JOIN books b ON bc.book_id = b.id
-WHERE l.status = 'active';
+SELECT
+    p.username,
+    p.email,
+    q.question_text,
+    sa.selected_answer_id,
+    sa.is_correct,
+    gs.score
+FROM session_answers sa
+JOIN players p ON sa.session_id = gs.id
+JOIN game_sessions gs ON sa.session_id = gs.id
+JOIN questions q ON sa.question_id = q.id
+WHERE gs.status = 'completed';
 
 -- SELF JOIN (иерархия категорий)
-SELECT 
+SELECT
     c.name AS category_name,
     p.name AS parent_category
 FROM categories c
 LEFT JOIN categories p ON c.parent_id = p.id;
 
 -- CROSS JOIN (декартово произведение)
-SELECT 
+SELECT
     d.day_name,
     t.time_slot
 FROM days d
@@ -504,14 +506,14 @@ CROSS JOIN time_slots t;
 
 ```sql
 -- UNION (уникальные строки)
-SELECT first_name, last_name, 'reader' AS type FROM readers
+SELECT username, email, 'player' AS type FROM players
 UNION
-SELECT first_name, last_name, 'staff' AS type FROM staff;
+SELECT username, email, 'admin' AS type FROM admins;
 
 -- UNION ALL (все строки, включая дубликаты)
-SELECT book_id FROM loans WHERE status = 'active'
+SELECT question_id FROM session_answers WHERE is_correct = TRUE
 UNION ALL
-SELECT book_id FROM reservations WHERE status = 'pending';
+SELECT question_id FROM session_answers WHERE is_correct = FALSE;
 ```
 
 ---

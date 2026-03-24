@@ -32,17 +32,17 @@
 ### Примеры использования:
 
 ```sql
--- Возраст человека (0-150)
-age TINYINT UNSIGNED
+-- Количество очков за вопрос (1-100)
+points TINYINT UNSIGNED
 
--- Количество книг на складе
-quantity INT UNSIGNED
+-- Количество вопросов в категории
+question_count INT UNSIGNED
 
--- Цена книги (точно до копеек)
-price DECIMAL(10,2)
+-- Сложность вопроса (1.0 - 10.0)
+difficulty DECIMAL(3,1)
 
--- Рейтинг (0.0 - 5.0)
-rating DECIMAL(3,1)
+-- Общий счет игрока (точно до единиц)
+total_score DECIMAL(10,2)
 ```
 
 ### Строковые типы данных
@@ -61,20 +61,20 @@ rating DECIMAL(3,1)
 ### Примеры использования:
 
 ```sql
--- ISBN книги (фиксированная длина)
-isbn CHAR(13)
+-- Слаг категории (фиксированная длина)
+slug CHAR(50)
 
--- Название книги (переменная длина)
-title VARCHAR(255)
+-- Название вопроса (переменная длина)
+question_text VARCHAR(500)
 
--- Описание книги (текст)
+-- Описание категории (текст)
 description TEXT
 
--- Статус книги (перечисление)
-status ENUM('available', 'borrowed', 'reserved', 'lost')
+-- Статус вопроса (перечисление)
+status ENUM('active', 'inactive', 'draft', 'archived')
 
--- Языки книги (множество)
-languages SET('ru', 'en', 'de', 'fr', 'es')
+-- Типы вопросов (множество)
+question_types SET('single_choice', 'multiple_choice', 'true_false', 'text_input')
 ```
 
 ### Типы данных для даты и времени
@@ -90,20 +90,20 @@ languages SET('ru', 'en', 'de', 'fr', 'es')
 ### Примеры использования:
 
 ```sql
--- Дата рождения читателя
+-- Дата рождения игрока
 birth_date DATE
 
--- Время выдачи книги
-issue_time TIME
+-- Время начала игровой сессии
+start_time TIME
 
--- Дата и время создания записи
+-- Дата и время создания вопроса
 created_at DATETIME
 
--- Время последнего обновления (авто)
+-- Время последнего обновления счета (авто)
 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 
--- Год издания книги
-publication_year YEAR
+-- Год создания категории
+created_year YEAR
 ```
 
 ### Типы данных для бинарных данных
@@ -156,13 +156,13 @@ Not Null: ✓
 PK: ✓
 Auto Increment: ✓
 
-Column Name: title
-Datatype: VARCHAR(255)
+Column Name: question_text
+Datatype: VARCHAR(500)
 Not Null: ✓
 
-Column Name: price
+Column Name: points
 Datatype: DECIMAL(10,2)
-Default Value: 0.00
+Default Value: 1.00
 ```
 
 ---
@@ -182,17 +182,17 @@ Default Value: 0.00
 
 **Пример нарушения 1NF:**
 
-| id | author | books |
-|----|--------|-------|
-| 1 | Иванов | "Книга 1, Книга 2, Книга 3" |
+| id | player | categories_played |
+|----|--------|---------------------|
+| 1 | Иванов | "История, Наука, Спорт" |
 
 **Исправление (1NF):**
 
-| id | author | book |
-|----|--------|------|
-| 1 | Иванов | "Книга 1" |
-| 2 | Иванов | "Книга 2" |
-| 3 | Иванов | "Книга 3" |
+| id | player | category |
+|----|--------|----------|
+| 1 | Иванов | "История" |
+| 2 | Иванов | "Наука" |
+| 3 | Иванов | "Спорт" |
 
 ### Вторая нормальная форма (2NF)
 
@@ -202,17 +202,17 @@ Default Value: 0.00
 
 **Пример нарушения 2NF:**
 
-| order_id | product_id | product_name | quantity |
-|----------|------------|--------------|----------|
-| 1 | 101 | "Книга А" | 2 |
+| session_id | question_id | question_text | selected_answer |
+|------------|-------------|---------------|-----------------|
+| 1 | 101 | "Вопрос А" | "Ответ 1" |
 
-`product_name` зависит только от `product_id`, а не от всего ключа.
+`question_text` зависит только от `question_id`, а не от всего ключа.
 
 **Исправление (2NF):**
 
 ```
-Orders (order_id, product_id, quantity)
-Products (product_id, product_name, price)
+SessionAnswers (session_id, question_id, selected_answer)
+Questions (question_id, question_text, category_id)
 ```
 
 ### Третья нормальная форма (3NF)
@@ -223,17 +223,17 @@ Products (product_id, product_name, price)
 
 **Пример нарушения 3NF:**
 
-| book_id | title | author | author_country |
-|---------|-------|--------|----------------|
-| 1 | "Война и мир" | "Толстой" | "Россия" |
+| question_id | question_text | category_id | category_name |
+|-------------|---------------|-------------|---------------|
+| 1 | "Вопрос?" | 10 | "История" |
 
-`author_country` зависит от `author`, а не от `book_id`.
+`category_name` зависит от `category_id`, а не от `question_id`.
 
 **Исправление (3NF):**
 
 ```
-Books (book_id, title, author_id)
-Authors (author_id, author_name, author_country)
+Questions (question_id, question_text, category_id)
+Categories (category_id, category_name, slug)
 ```
 
 ### Нормальные формы высших порядков
@@ -261,42 +261,42 @@ Authors (author_id, author_name, author_country)
 
 ```sql
 -- При создании таблицы
-CREATE TABLE books (
+CREATE TABLE categories (
     id INT PRIMARY KEY,
-    title VARCHAR(255)
+    name VARCHAR(100)
 );
 
 -- Или с AUTO_INCREMENT
-CREATE TABLE books (
+CREATE TABLE categories (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255)
+    name VARCHAR(100)
 );
 
 -- Составной первичный ключ
-CREATE TABLE book_authors (
-    book_id INT,
-    author_id INT,
-    PRIMARY KEY (book_id, author_id)
+CREATE TABLE session_answers (
+    session_id INT,
+    question_id INT,
+    PRIMARY KEY (session_id, question_id)
 );
 ```
 
 ### Внешний ключ (FOREIGN KEY)
 
 ```sql
-CREATE TABLE loans (
+CREATE TABLE game_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    book_id INT NOT NULL,
-    reader_id INT NOT NULL,
-    loan_date DATE,
-    return_date DATE,
-    
+    player_id INT NOT NULL,
+    category_id INT NOT NULL,
+    score INT,
+    status VARCHAR(20),
+
     -- Внешние ключи
-    FOREIGN KEY (book_id) REFERENCES books(id),
-    FOREIGN KEY (reader_id) REFERENCES readers(id)
+    FOREIGN KEY (player_id) REFERENCES players(id),
+    FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
 -- С указанием действий при удалении/обновлении
-FOREIGN KEY (book_id) REFERENCES books(id)
+FOREIGN KEY (category_id) REFERENCES categories(id)
     ON DELETE CASCADE
     ON UPDATE CASCADE
 ```
@@ -314,14 +314,14 @@ FOREIGN KEY (book_id) REFERENCES books(id)
 
 ```sql
 -- При создании таблицы
-CREATE TABLE readers (
+CREATE TABLE players (
     id INT PRIMARY KEY,
-    email VARCHAR(100) UNIQUE,
-    phone VARCHAR(20) UNIQUE
+    username VARCHAR(100) UNIQUE,
+    email VARCHAR(100) UNIQUE
 );
 
 -- Добавление после создания
-ALTER TABLE readers ADD UNIQUE (email);
+ALTER TABLE players ADD UNIQUE (email);
 ```
 
 ---
@@ -339,20 +339,20 @@ ALTER TABLE readers ADD UNIQUE (email);
 ### Реализация связи 1:1
 
 ```sql
-CREATE TABLE readers (
+CREATE TABLE players (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    first_name VARCHAR(50),
-    last_name VARCHAR(50)
+    username VARCHAR(50),
+    email VARCHAR(100)
 );
 
-CREATE TABLE reader_passports (
+CREATE TABLE player_profiles (
     id INT PRIMARY KEY,
-    passport_series VARCHAR(4),
-    passport_number VARCHAR(6),
-    issue_date DATE,
-    
+    avatar_url VARCHAR(255),
+    bio TEXT,
+    created_at DATETIME,
+
     -- Связь 1:1
-    FOREIGN KEY (id) REFERENCES readers(id)
+    FOREIGN KEY (id) REFERENCES players(id)
         ON DELETE CASCADE
 );
 ```
@@ -360,18 +360,18 @@ CREATE TABLE reader_passports (
 ### Реализация связи 1:M
 
 ```sql
-CREATE TABLE authors (
+CREATE TABLE categories (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100)
 );
 
-CREATE TABLE books (
+CREATE TABLE questions (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    title VARCHAR(255),
-    author_id INT,
-    
-    -- Связь 1:M (один автор — много книг)
-    FOREIGN KEY (author_id) REFERENCES authors(id)
+    question_text VARCHAR(500),
+    category_id INT,
+
+    -- Связь 1:M (одна категория — много вопросов)
+    FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 ```
 
@@ -379,44 +379,46 @@ CREATE TABLE books (
 
 ```sql
 -- Таблица связи (junction table)
-CREATE TABLE book_loans (
+CREATE TABLE session_answers (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    book_id INT NOT NULL,
-    reader_id INT NOT NULL,
-    loan_date DATE NOT NULL,
-    due_date DATE,
-    return_date DATE,
-    
-    FOREIGN KEY (book_id) REFERENCES books(id),
-    FOREIGN KEY (reader_id) REFERENCES readers(id),
-    
+    session_id INT NOT NULL,
+    question_id INT NOT NULL,
+    selected_answer_id INT,
+    is_correct BOOLEAN,
+
+    FOREIGN KEY (session_id) REFERENCES game_sessions(id),
+    FOREIGN KEY (question_id) REFERENCES questions(id),
+
     -- Индексы для ускорения поиска
-    INDEX idx_loan_dates (loan_date, return_date)
+    INDEX idx_session_questions (session_id, question_id)
 );
 ```
 
-### Диаграмма связей для библиотеки
+### Диаграмма связей для викторины
 
 ```
 ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-│   Authors   │ 1:M   │    Books    │ 1:M   │  Categories │
+│  Categories │ 1:M   │  Questions  │ 1:M   │   Answers   │
 ├─────────────┤       ├─────────────┤       ├─────────────┤
 │ id (PK)     │──────<│ id (PK)     │       │ id (PK)     │
-│ name        │       │ title       │>------│ name        │
-│ country     │       │ author_id   │       │ description │
-└─────────────┘       │ category_id │       └─────────────┘
-                      │ isbn        │
+│ name        │       │ question    │>------│ answer_text │
+│ slug        │       │ category_id │       │ is_correct  │
+│ description │       │ difficulty  │       │ question_id │
+└─────────────┘       │ points      │       └─────────────┘
+                      │ status      │
                       └──────┬──────┘
                              │
                       ┌──────▼──────┐       ┌─────────────┐
-                      │  BookLoans  │ M:N   │   Readers   │
+                      │SessionAnswers│ M:N  │ GameSessions│
                       ├─────────────┤       ├─────────────┤
                       │ id (PK)     │>------│ id (PK)     │
-                      │ book_id     │       │ first_name  │
-                      │ reader_id   │<------│ last_name   │
-                      │ loan_date   │       │ email       │
-                      │ return_date │       │ phone       │
-                      └─────────────┘       └─────────────┘
+                      │ session_id  │       │ player_id   │<──────│   Players   │
+                      │ question_id │       │ category_id │       ├─────────────┤
+                      │ is_correct  │       │ score       │       │ id (PK)     │
+                      └─────────────┘       │ status      │       │ username    │
+                                            └─────────────┘       │ email       │
+                                                                  │ total_score │
+                                                                  └─────────────┘
 ```
 
 ---
@@ -493,37 +495,40 @@ SET @OLD_SQL_MODE=@@SQL_MODE;
 SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO';
 
 -- -----------------------------------------------------
--- Schema library_db
+-- Schema quiz_db
 -- -----------------------------------------------------
-DROP SCHEMA IF EXISTS `library_db` ;
+DROP SCHEMA IF EXISTS `quiz_db` ;
 
-CREATE SCHEMA IF NOT EXISTS `library_db` 
+CREATE SCHEMA IF NOT EXISTS `quiz_db`
     DEFAULT CHARACTER SET utf8mb4 ;
-USE `library_db` ;
+USE `quiz_db` ;
 
 -- -----------------------------------------------------
--- Table `library_db`.`authors`
+-- Table `quiz_db`.`categories`
 -- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS `library_db`.`authors` (
+CREATE TABLE IF NOT EXISTS `quiz_db`.`categories` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(100) NOT NULL,
-  `country` VARCHAR(50) NULL,
+  `slug` VARCHAR(50) NOT NULL,
+  `description` TEXT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB;
 
 -- -----------------------------------------------------
--- Table `library_db`.`books`
+-- Table `quiz_db`.`questions`
 -- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS `library_db`.`books` (
+CREATE TABLE IF NOT EXISTS `quiz_db`.`questions` (
   `id` INT NOT NULL AUTO_INCREMENT,
-  `title` VARCHAR(255) NOT NULL,
-  `isbn` CHAR(13) NULL,
-  `author_id` INT NOT NULL,
+  `category_id` INT NOT NULL,
+  `question_text` VARCHAR(500) NOT NULL,
+  `difficulty` DECIMAL(3,1) DEFAULT 1.0,
+  `points` INT UNSIGNED DEFAULT 1,
+  `status` ENUM('active', 'inactive', 'draft') DEFAULT 'active',
   PRIMARY KEY (`id`),
-  INDEX `fk_books_authors_idx` (`author_id` ASC),
-  CONSTRAINT `fk_books_authors`
-    FOREIGN KEY (`author_id`)
-    REFERENCES `library_db`.`authors` (`id`)
+  INDEX `fk_questions_categories_idx` (`category_id` ASC),
+  CONSTRAINT `fk_questions_categories`
+    FOREIGN KEY (`category_id`)
+    REFERENCES `quiz_db`.`categories` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE
 ) ENGINE=InnoDB;

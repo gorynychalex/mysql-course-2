@@ -31,22 +31,22 @@ SELECT column FROM table2;
 ### Примеры UNION
 
 ```sql
--- Объединение списков людей
-SELECT first_name, last_name, 'reader' AS type FROM readers
+-- Объединение списков игроков
+SELECT username, email, 'player' AS type FROM players
 UNION
-SELECT first_name, last_name, 'staff' AS type FROM staff
-ORDER BY last_name;
+SELECT username, email, 'admin' AS type FROM admins
+ORDER BY email;
 
 -- Поиск по нескольким таблицам
-SELECT book_id, 'loan' AS source, loan_date AS date FROM loans
+SELECT question_id, 'session' AS source, created_at AS date FROM session_answers
 UNION ALL
-SELECT book_id, 'reservation' AS source, reservation_date AS date FROM reservations
+SELECT question_id, 'practice' AS source, created_at AS date FROM practice_answers
 ORDER BY date DESC;
 
 -- UNION с разным количеством столбцов
-SELECT id, title, author, NULL AS reason FROM books
+SELECT id, question_text, category_id, NULL AS reason FROM questions
 UNION ALL
-SELECT id, title, author, ban_reason FROM banned_books;
+SELECT id, question_text, category_id, ban_reason FROM banned_questions;
 ```
 
 ### Требования к UNION
@@ -63,72 +63,71 @@ SELECT id, title, author, ban_reason FROM banned_books;
 
 ```sql
 -- IN: значение в списке
-SELECT * FROM books 
-WHERE author_id IN (SELECT id FROM authors WHERE country = 'Россия');
+SELECT * FROM questions
+WHERE category_id IN (SELECT id FROM categories WHERE slug LIKE 'hist%');
 
 -- NOT IN: значение не в списке
-SELECT * FROM readers 
-WHERE id NOT IN (SELECT DISTINCT reader_id FROM loans WHERE status = 'overdue');
+SELECT * FROM players
+WHERE id NOT IN (SELECT DISTINCT player_id FROM game_sessions WHERE status = 'completed');
 
 -- Сравнение с подзапросом
-SELECT * FROM books 
-WHERE price > (SELECT AVG(price) FROM books);
+SELECT * FROM questions
+WHERE points > (SELECT AVG(points) FROM questions);
 
 -- ANY/SOME: сравнение с любым значением
-SELECT * FROM books 
-WHERE price > SOME (SELECT price FROM books WHERE category_id = 1);
+SELECT * FROM questions
+WHERE points > SOME (SELECT points FROM questions WHERE category_id = 1);
 
 -- ALL: сравнение со всеми значениями
-SELECT * FROM books 
-WHERE price > ALL (SELECT price FROM books WHERE category_id = 1);
+SELECT * FROM questions
+WHERE points > ALL (SELECT points FROM questions WHERE category_id = 1);
 ```
 
 ### Подзапросы в FROM
 
 ```sql
 -- Подзапрос как таблица
-SELECT 
+SELECT
     category_name,
-    avg_price
+    avg_difficulty
 FROM (
-    SELECT 
+    SELECT
         c.name AS category_name,
-        AVG(b.price) AS avg_price
-    FROM books b
-    JOIN categories c ON b.category_id = c.id
+        AVG(q.difficulty) AS avg_difficulty
+    FROM questions q
+    JOIN categories c ON q.category_id = c.id
     GROUP BY c.id
 ) AS category_stats
-WHERE avg_price > 100;
+WHERE avg_difficulty > 5.0;
 ```
 
 ### Подзапросы в SELECT
 
 ```sql
 -- Скалярный подзапрос
-SELECT 
-    b.title,
-    (SELECT COUNT(*) FROM loans l JOIN book_copies bc ON l.copy_id = bc.id 
-     WHERE bc.book_id = b.id) AS loan_count,
-    (SELECT AVG(rating) FROM reviews WHERE book_id = b.id) AS avg_rating
-FROM books b;
+SELECT
+    q.question_text,
+    (SELECT COUNT(*) FROM session_answers sa WHERE sa.question_id = q.id) AS answer_count,
+    (SELECT AVG(is_correct) FROM session_answers sa WHERE sa.question_id = q.id) AS correct_rate
+FROM questions q;
 ```
 
 ### Коррелированные подзапросы
 
 ```sql
 -- Подзапрос зависит от внешнего запроса
-SELECT 
-    r.first_name,
-    r.last_name,
-    (SELECT COUNT(*) FROM loans l WHERE l.reader_id = r.id) AS total_loans
-FROM readers r;
+SELECT
+    p.username,
+    p.email,
+    (SELECT COUNT(*) FROM game_sessions gs WHERE gs.player_id = p.id) AS total_games
+FROM players p;
 
 -- С EXISTS
-SELECT * FROM readers r
+SELECT * FROM players p
 WHERE EXISTS (
-    SELECT 1 FROM loans l 
-    WHERE l.reader_id = r.id 
-    AND l.status = 'overdue'
+    SELECT 1 FROM game_sessions gs
+    WHERE gs.player_id = p.id
+    AND gs.score > 1000
 );
 ```
 
@@ -153,24 +152,24 @@ WHERE c.id IN (SELECT category_id FROM questions);
 ### Примеры EXISTS
 
 ```sql
--- Читатели с активными выдачами
-SELECT * FROM readers r
+-- Игроки с активными сессиями
+SELECT * FROM players p
 WHERE EXISTS (
-    SELECT 1 FROM loans l 
-    WHERE l.reader_id = r.id 
-    AND l.status = 'active'
+    SELECT 1 FROM game_sessions gs
+    WHERE gs.player_id = p.id
+    AND gs.status = 'in_progress'
 );
 
--- Книги без экземпляров
-SELECT * FROM books b
+-- Категории без вопросов
+SELECT * FROM categories c
 WHERE NOT EXISTS (
-    SELECT 1 FROM book_copies bc WHERE bc.book_id = b.id
+    SELECT 1 FROM questions q WHERE q.category_id = c.id
 );
 
--- Авторы без книг в библиотеке
-SELECT * FROM authors a
+-- Игроки без игровых сессий
+SELECT * FROM players p
 WHERE NOT EXISTS (
-    SELECT 1 FROM book_authors ba WHERE ba.author_id = a.id
+    SELECT 1 FROM game_sessions gs WHERE gs.player_id = p.id
 );
 ```
 
@@ -182,61 +181,59 @@ WHERE NOT EXISTS (
 
 ```sql
 -- Простое представление
-CREATE VIEW v_available_books AS
-SELECT 
-    b.id,
-    b.title,
-    b.author,
-    bc.inventory_number,
-    bc.location
-FROM books b
-JOIN book_copies bc ON b.id = bc.book_id
-WHERE bc.status = 'available';
+CREATE VIEW v_active_questions AS
+SELECT
+    q.id,
+    q.question_text,
+    q.difficulty,
+    q.points,
+    c.name AS category_name
+FROM questions q
+JOIN categories c ON q.category_id = c.id
+WHERE q.status = 'active';
 
 -- Представление с группировкой
-CREATE VIEW v_reader_stats AS
-SELECT 
-    r.id,
-    r.first_name,
-    r.last_name,
-    r.email,
-    COUNT(l.id) AS total_loans,
-    SUM(CASE WHEN l.status = 'active' THEN 1 ELSE 0 END) AS active_loans,
-    SUM(f.amount) AS total_fines
-FROM readers r
-LEFT JOIN loans l ON r.id = l.reader_id
-LEFT JOIN fines f ON r.id = f.reader_id
-GROUP BY r.id;
+CREATE VIEW v_player_stats AS
+SELECT
+    p.id,
+    p.username,
+    p.email,
+    COUNT(gs.id) AS total_games,
+    SUM(gs.score) AS total_score,
+    AVG(gs.score) AS avg_score
+FROM players p
+LEFT JOIN game_sessions gs ON p.id = gs.player_id
+GROUP BY p.id;
 
 -- Представление с вычислениями
-CREATE VIEW v_overdue_loans AS
-SELECT 
-    l.id,
-    r.first_name,
-    r.last_name,
-    r.phone,
-    b.title,
-    l.loan_date,
-    l.due_date,
-    DATEDIFF(CURDATE(), l.due_date) AS days_overdue,
-    DATEDIFF(CURDATE(), l.due_date) * 10 AS fine_amount
-FROM loans l
-JOIN readers r ON l.reader_id = r.id
-JOIN book_copies bc ON l.copy_id = bc.id
-JOIN books b ON bc.book_id = b.id
-WHERE l.status = 'active' 
-  AND l.due_date < CURDATE();
+CREATE VIEW v_completed_sessions AS
+SELECT
+    gs.id,
+    p.username,
+    p.email,
+    c.name AS category_name,
+    gs.score,
+    gs.status,
+    CASE
+        WHEN gs.score > 1000 THEN 'excellent'
+        WHEN gs.score > 500 THEN 'good'
+        ELSE 'needs_improvement'
+    END AS performance
+FROM game_sessions gs
+JOIN players p ON gs.player_id = p.id
+JOIN categories c ON gs.category_id = c.id
+WHERE gs.status = 'completed';
 ```
 
 ### Использование представлений
 
 ```sql
 -- Запрос к представлению
-SELECT * FROM v_available_books WHERE location = 'A1';
+SELECT * FROM v_active_questions WHERE category_name = 'История';
 
 -- Объединение представлений
-SELECT * FROM v_reader_stats 
-JOIN v_overdue_loans ON v_reader_stats.id = v_overdue_loans.reader_id;
+SELECT * FROM v_player_stats
+JOIN v_completed_sessions ON v_player_stats.id = v_completed_sessions.player_id;
 ```
 
 ### Обновляемые представления
@@ -247,14 +244,14 @@ JOIN v_overdue_loans ON v_reader_stats.id = v_overdue_loans.reader_id;
 -- 2. Нет GROUP BY, DISTINCT, агрегатных функций
 -- 3. Нет подзапросов в SELECT
 
-CREATE VIEW v_active_readers AS
-SELECT id, first_name, last_name, email
-FROM readers
+CREATE VIEW v_active_players AS
+SELECT id, username, email, total_score
+FROM players
 WHERE is_active = TRUE;
 
 -- Обновление через представление
-UPDATE v_active_readers 
-SET email = 'new@email.com' 
+UPDATE v_active_players
+SET email = 'new@email.com'
 WHERE id = 1;
 ```
 
@@ -266,16 +263,16 @@ WHERE id = 1;
 
 ```sql
 -- ОШИБКА: нельзя с ORDER BY без LIMIT
-CREATE VIEW v_books_sorted AS
-SELECT * FROM books ORDER BY title;
+CREATE VIEW v_questions_sorted AS
+SELECT * FROM questions ORDER BY difficulty;
 
 -- ПРАВИЛЬНО: с LIMIT
-CREATE VIEW v_books_sorted AS
-SELECT * FROM books ORDER BY title LIMIT 100;
+CREATE VIEW v_questions_sorted AS
+SELECT * FROM questions ORDER BY difficulty LIMIT 100;
 
 -- ОШИБКА: нельзя с GROUP BY и обновлением
-CREATE VIEW v_book_stats AS
-SELECT author, COUNT(*) AS cnt FROM books GROUP BY author;
+CREATE VIEW v_question_stats AS
+SELECT category_id, COUNT(*) AS cnt FROM questions GROUP BY category_id;
 -- Нельзя UPDATE/INSERT/DELETE через это представление
 ```
 
@@ -287,22 +284,22 @@ CREATE VIEW v_stats AS SELECT ...;
 
 -- В MySQL нет материализованных представлений
 -- Но можно использовать таблицы для кэширования
-CREATE TABLE m_book_stats AS
-SELECT author, COUNT(*) AS cnt FROM books GROUP BY author;
+CREATE TABLE m_question_stats AS
+SELECT category_id, COUNT(*) AS cnt FROM questions GROUP BY category_id;
 ```
 
 ### Управление представлениями
 
 ```sql
 -- Показать создания представления
-SHOW CREATE VIEW v_available_books;
+SHOW CREATE VIEW v_active_questions;
 
 -- Обновить представление
-CREATE OR REPLACE VIEW v_available_books AS
+CREATE OR REPLACE VIEW v_active_questions AS
 SELECT ... новый запрос ...;
 
 -- Удалить представление
-DROP VIEW IF EXISTS v_available_books;
+DROP VIEW IF EXISTS v_active_questions;
 
 -- Показать все представления
 SHOW FULL TABLES WHERE TABLE_TYPE = 'VIEW';

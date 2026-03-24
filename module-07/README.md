@@ -40,20 +40,20 @@ UNLOCK TABLES;
 
 ```sql
 -- Атомарное обновление нескольких таблиц
-LOCK TABLES 
-    books WRITE,
-    book_copies WRITE,
-    loans WRITE;
+LOCK TABLES
+    questions WRITE,
+    game_sessions WRITE,
+    session_answers WRITE;
 
--- Проверка доступности
-SELECT COUNT(*) FROM book_copies 
-WHERE book_id = 1 AND status = 'available';
+-- Проверка доступности вопроса
+SELECT COUNT(*) FROM game_sessions
+WHERE question_id = 1 AND status = 'in_progress';
 
--- Создание выдачи
-INSERT INTO loans (book_id, reader_id, loan_date) VALUES (1, 5, CURDATE());
+-- Создание игровой сессии
+INSERT INTO game_sessions (player_id, category_id, started_at) VALUES (5, 1, CURDATE());
 
 -- Обновление статуса
-UPDATE book_copies SET status = 'borrowed' WHERE id = 10;
+UPDATE game_sessions SET status = 'in_progress' WHERE id = 10;
 
 UNLOCK TABLES;
 ```
@@ -86,16 +86,16 @@ SELECT IS_FREE_LOCK('lock_name');
 START TRANSACTION;
 
 -- Попытка получить блокировку
-SELECT GET_LOCK('book_1_lock', 10) AS lock_acquired;
+SELECT GET_LOCK('question_1_lock', 10) AS lock_acquired;
 
 -- Если блокировка получена (1)
 IF lock_acquired = 1 THEN
     -- Критическая секция
-    UPDATE books SET view_count = view_count + 1 WHERE id = 1;
-    
+    UPDATE questions SET view_count = view_count + 1 WHERE id = 1;
+
     -- Освобождение блокировки
-    SELECT RELEASE_LOCK('book_1_lock');
-    
+    SELECT RELEASE_LOCK('question_1_lock');
+
     COMMIT;
 ELSE
     -- Блокировка не получена
@@ -144,17 +144,17 @@ SET AUTOCOMMIT = 1; -- Включить
 ```sql
 START TRANSACTION;
 
--- Перевод книги в другой фонд
-UPDATE book_copies 
-SET location = 'B2', status = 'available'
+-- Перевод вопроса в другую категорию
+UPDATE questions
+SET category_id = 2, status = 'review'
 WHERE id = 10;
 
 -- Логирование перемещения
-INSERT INTO movement_log (copy_id, from_location, to_location, moved_at)
-VALUES (10, 'A1', 'B2', NOW());
+INSERT INTO question_move_log (question_id, from_category, to_category, moved_at)
+VALUES (10, 1, 2, NOW());
 
 -- Проверка перед фиксацией
-SELECT * FROM book_copies WHERE id = 10;
+SELECT * FROM questions WHERE id = 10;
 
 -- Если всё правильно
 COMMIT;
@@ -194,18 +194,18 @@ SET TRANSACTION ISOLATION LEVEL
 START TRANSACTION;
 
 -- Первая операция
-INSERT INTO readers (first_name, last_name, email) 
-VALUES ('Иван', 'Петров', 'ivan@test.com');
+INSERT INTO players (username, email, total_score)
+VALUES ('ivan_gamer', 'ivan@test.com', 0);
 
 -- Точка сохранения
-SAVEPOINT after_reader_insert;
+SAVEPOINT after_player_insert;
 
 -- Вторая операция
-INSERT INTO loans (reader_id, book_id, loan_date) 
+INSERT INTO game_sessions (player_id, category_id, started_at)
 VALUES (LAST_INSERT_ID(), 5, CURDATE());
 
 -- Если ошибка - откат к точке
-ROLLBACK TO SAVEPOINT after_reader_insert;
+ROLLBACK TO SAVEPOINT after_player_insert;
 
 -- Или фиксация всего
 COMMIT;
@@ -229,10 +229,10 @@ RELEASE SAVEPOINT point_name;
 ```sql
 DELIMITER //
 
-CREATE PROCEDURE complex_book_transfer(
-    IN p_copy_id INT,
-    IN p_from_branch INT,
-    IN p_to_branch INT
+CREATE PROCEDURE complex_question_transfer(
+    IN p_question_id INT,
+    IN p_from_category INT,
+    IN p_to_category INT
 )
 BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -240,38 +240,38 @@ BEGIN
         ROLLBACK;
         RESIGNAL;
     END;
-    
+
     START TRANSACTION;
-    
+
     SAVEPOINT before_update;
-    
-    -- Обновление копии
-    UPDATE book_copies 
-    SET location = p_to_branch,
-        status = 'in_transit'
-    WHERE id = p_copy_id AND location = p_from_branch;
-    
+
+    -- Обновление вопроса
+    UPDATE questions
+    SET category_id = p_to_category,
+        status = 'pending_review'
+    WHERE id = p_question_id AND category_id = p_from_category;
+
     IF ROW_COUNT() = 0 THEN
         ROLLBACK TO SAVEPOINT before_update;
-        SIGNAL SQLSTATE '45000' 
-        SET MESSAGE_TEXT = 'Copy not found or already moved';
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Question not found or already moved';
     END IF;
-    
-    SAVEPOINT after_copy_update;
-    
+
+    SAVEPOINT after_question_update;
+
     -- Логирование
-    INSERT INTO transfer_log (copy_id, from_branch, to_branch, transferred_at)
-    VALUES (p_copy_id, p_from_branch, p_to_branch, NOW());
-    
-    -- Обновление статистики филиалов
-    UPDATE branch_stats 
-    SET book_count = book_count - 1 
-    WHERE branch_id = p_from_branch;
-    
-    UPDATE branch_stats 
-    SET book_count = book_count + 1 
-    WHERE branch_id = p_to_branch;
-    
+    INSERT INTO transfer_log (question_id, from_category, to_category, transferred_at)
+    VALUES (p_question_id, p_from_category, p_to_category, NOW());
+
+    -- Обновление статистики категорий
+    UPDATE category_stats
+    SET question_count = question_count - 1
+    WHERE category_id = p_from_category;
+
+    UPDATE category_stats
+    SET question_count = question_count + 1
+    WHERE category_id = p_to_category;
+
     COMMIT;
 END//
 
