@@ -9,6 +9,9 @@
 3. Создание таблиц
 4. Временные таблицы
 5. Индексы
+   - Типы индексов
+   - Размер индексов (расчёт и проверка)
+   - Оптимизация запросов с индексами (EXPLAIN)
 6. Полнотекстовый индекс
 7. Оператор модификации ALTER
 
@@ -377,6 +380,18 @@ SHOW INDEX FROM players;
 -- Альтернатива
 SHOW INDEXES FROM players;
 SHOW KEYS FROM players;
+
+-- Подробная информация из INFORMATION_SCHEMA
+SELECT 
+    TABLE_NAME,
+    INDEX_NAME,
+    COLUMN_NAME,
+    SEQ_IN_INDEX,
+    CARDINALITY,
+    INDEX_TYPE
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = 'quiz_db'
+ORDER BY TABLE_NAME, INDEX_NAME;
 ```
 
 ### Удаление индексов
@@ -392,19 +407,329 @@ ALTER TABLE players DROP INDEX idx_email;
 ALTER TABLE players DROP PRIMARY KEY;
 ```
 
-### Когда создавать индексы
+---
 
-✅ **Создавать индекс:**
-- Поля в WHERE
-- Поля в JOIN
-- Поля в ORDER BY
-- Поля в GROUP BY
-- Внешние ключи
+## 5.1. Размер индексов
 
-❌ **Не создавать индекс:**
-- Таблицы с частыми INSERT/UPDATE/DELETE
-- Поля с низкой селективностью (пол, статус)
-- Маленькие таблицы
+### Формула расчёта
+
+```
+Размер индекса = Размер_ключа × Количество_строк × Коэффициент_дерева
+
+Для B-дерева коэффициент = 1.2 - 1.5 (накладные расходы)
+```
+
+### Пример расчёта для таблицы викторины
+
+```sql
+-- Таблица questions
+-- question_text VARCHAR(500) — средний размер 100 символов = 100 байт
+-- Количество вопросов: 100,000
+
+-- Индекс по question_text:
+-- 100 байт × 100,000 × 1.2 = 12 MB
+
+-- Таблица players
+-- username VARCHAR(50) — средний размер 20 символов = 20 байт
+-- email VARCHAR(100) — средний размер 30 символов = 30 байт
+-- Количество игроков: 1,000,000
+
+-- Индекс по username:
+-- 20 байт × 1,000,000 × 1.2 = 24 MB
+
+-- Составной индекс (username, email):
+-- (20 + 30) байт × 1,000,000 × 1.2 = 60 MB
+```
+
+### Реальные размеры индексов
+
+| Тип индекса | Столбцы | Строк | Размер |
+|-------------|---------|-------|--------|
+| PRIMARY KEY | INT | 1 млн | 4 MB |
+| UNIQUE | VARCHAR(50) | 1 млн | 50-60 MB |
+| INDEX | VARCHAR(100) | 1 млн | 100-120 MB |
+| COMPOSITE | 2×VARCHAR(50) | 1 млн | 100-120 MB |
+| FULLTEXT | TEXT(1000) | 1 млн | 500 MB - 1 GB |
+
+### Проверка размера индексов
+
+```sql
+-- Способ 1: Через INFORMATION_SCHEMA.TABLES
+SELECT 
+    TABLE_NAME,
+    ROUND(DATA_LENGTH / 1024 / 1024, 2) AS data_size_mb,
+    ROUND(INDEX_LENGTH / 1024 / 1024, 2) AS index_size_mb,
+    ROUND((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024, 2) AS total_mb,
+    ROUND(INDEX_LENGTH * 100.0 / DATA_LENGTH, 2) AS index_ratio_percent
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'quiz_db'
+ORDER BY total_mb DESC;
+
+-- Способ 2: Детальная информация по индексам
+SELECT 
+    TABLE_NAME,
+    INDEX_NAME,
+    ROUND(STAT_VALUE * @@innodb_page_size / 1024 / 1024, 2) AS size_mb
+FROM mysql.innodb_index_stats
+WHERE database_name = 'quiz_db'
+  AND stat_name = 'size'
+ORDER BY size_mb DESC;
+
+-- Способ 3: Через SHOW TABLE STATUS
+SHOW TABLE STATUS FROM quiz_db;
+```
+
+### Рекомендации по размеру индексов
+
+| Размер БД | Рекомендуемый размер индексов |
+|-----------|-------------------------------|
+| < 1 GB | 10-20% от размера данных |
+| 1-10 GB | 20-30% от размера данных |
+| 10-100 GB | 30-50% от размера данных |
+| > 100 GB | Индивидуальный расчёт |
+
+### Селективность индекса
+
+```sql
+-- Селективность = Уникальные значения / Всего строк
+-- Высокая селективность (> 0.3) — хороший кандидат для индекса
+
+-- Пример для username (высокая селективность)
+SELECT 
+    COUNT(DISTINCT username) * 1.0 / COUNT(*) AS selectivity,
+    COUNT(DISTINCT username) AS unique_values,
+    COUNT(*) AS total_rows
+FROM players;
+-- Результат: 0.95 (отлично!)
+
+-- Пример для status (низкая селективность)
+SELECT 
+    COUNT(DISTINCT status) * 1.0 / COUNT(*) AS selectivity,
+    COUNT(DISTINCT status) AS unique_values,
+    COUNT(*) AS total_rows
+FROM game_sessions;
+-- Результат: 0.003 (плохо, не стоит создавать индекс)
+```
+
+---
+
+## 5.2. Оптимизация запросов с индексами
+
+### EXPLAIN — анализ запросов
+
+```sql
+-- Базовый EXPLAIN
+EXPLAIN SELECT * FROM players WHERE username = 'alex';
+
+-- Расширенный EXPLAIN (MySQL 5.7+)
+EXPLAIN FORMAT=JSON SELECT * FROM players WHERE username = 'alex';
+
+-- EXPLAIN с выполнением (MySQL 8.0.18+)
+EXPLAIN ANALYZE SELECT * FROM players WHERE username = 'alex';
+```
+
+### Поля EXPLAIN
+
+```sql
+EXPLAIN SELECT p.username, p.email, COUNT(gs.id) AS games
+FROM players p
+JOIN game_sessions gs ON p.id = gs.player_id
+WHERE p.total_score > 1000
+GROUP BY p.id
+HAVING games > 5
+ORDER BY games DESC
+LIMIT 10;
+```
+
+| Поле | Значение | Описание |
+|------|----------|----------|
+| **id** | 1 | Номер SELECT в запросе |
+| **select_type** | SIMPLE | Тип SELECT (SIMPLE, PRIMARY, SUBQUERY) |
+| **table** | players | Таблица |
+| **type** | ref | Тип соединения (см. ниже) |
+| **possible_keys** | idx_username | Возможные индексы |
+| **key** | idx_username | Используемый индекс |
+| **key_len** | 202 | Длина используемого ключа (байты) |
+| **ref** | const | Столбцы/константы для сравнения |
+| **rows** | 1 | Оцениваемое количество строк |
+| **filtered** | 100.00 | Процент отфильтрованных строк |
+| **Extra** | Using index | Дополнительная информация |
+
+### Типы доступа (type) — от лучшего к худшему
+
+| Type | Описание | Пример |
+|------|----------|--------|
+| **system** | Одна строка в таблице | PRIMARY KEY с одним значением |
+| **const** | Константа (1 строка) | WHERE id = 1 (PRIMARY KEY) |
+| **eq_ref** | Уникальный ключ | JOIN по PRIMARY KEY |
+| **ref** | Не уникальный индекс | WHERE username = 'alex' |
+| **fulltext** | Полнотекстовый поиск | MATCH() AGAINST() |
+| **range** | Диапазон по индексу | WHERE id BETWEEN 1 AND 100 |
+| **index** | Полное сканирование индекса | SELECT COUNT(*) FROM table |
+| **ALL** | Полное сканирование таблицы ❌ | WHERE LOWER(username) = 'alex' |
+
+### Примеры оптимизации запросов
+
+#### ❌ Плохо: функция в WHERE
+
+```sql
+-- Полное сканирование (type: ALL)
+EXPLAIN SELECT * FROM players 
+WHERE YEAR(created_at) = 2024;
+
+-- ✅ Решение: диапазон дат
+EXPLAIN SELECT * FROM players 
+WHERE created_at >= '2024-01-01' 
+  AND created_at < '2025-01-01';
+-- type: range (использует индекс)
+```
+
+#### ❌ Плохо: LIKE с wildcard в начале
+
+```sql
+-- Полное сканирование (type: ALL)
+EXPLAIN SELECT * FROM players 
+WHERE username LIKE '%alex%';
+
+-- ✅ Решение 1: FULLTEXT индекс
+CREATE FULLTEXT INDEX ft_username ON players(username);
+
+EXPLAIN SELECT * FROM players 
+WHERE MATCH(username) AGAINST('alex' IN NATURAL LANGUAGE MODE);
+-- type: fulltext
+
+-- ✅ Решение 2: LIKE с префиксом
+EXPLAIN SELECT * FROM players 
+WHERE username LIKE 'alex%';
+-- type: range (использует обычный индекс)
+```
+
+#### ❌ Плохо: OR без индексов
+
+```sql
+-- type: ALL
+EXPLAIN SELECT * FROM questions 
+WHERE difficulty = 'easy' OR view_count > 100;
+
+-- ✅ Решение: UNION
+EXPLAIN SELECT * FROM questions WHERE difficulty = 'easy'
+UNION
+SELECT * FROM questions WHERE view_count > 100;
+-- type: ref / range (использует индексы)
+```
+
+#### ✅ Хорошо: Covering Index (Покрывающий индекс)
+
+```sql
+-- Создаём покрывающий индекс
+CREATE INDEX idx_covering ON players(username, email, total_score);
+
+-- Запрос использует только индекс (без обращения к таблице)
+EXPLAIN SELECT username, email, total_score 
+FROM players 
+WHERE username = 'alex';
+-- Extra: Using index (все данные в индексе!)
+```
+
+**Преимущества Covering Index:**
+- Не нужно обращаться к таблице
+- Все данные в индексе
+- Максимальная производительность
+
+#### ✅ Хорошо: Composite Index (Составной индекс)
+
+```sql
+-- Составной индекс для частого запроса
+CREATE INDEX idx_score_category ON questions(category_id, difficulty);
+
+-- Запрос использует индекс (порядок важен!)
+EXPLAIN SELECT * FROM questions 
+WHERE category_id = 5 AND difficulty = 'medium';
+-- type: ref
+
+-- ❌ Не использует индекс (нарушен порядок)
+EXPLAIN SELECT * FROM questions 
+WHERE difficulty = 'medium';
+-- type: ALL
+```
+
+**Правило левой руки для составных индексов:**
+```sql
+-- Индекс: (A, B, C)
+
+-- ✅ Работает:
+WHERE A = 1
+WHERE A = 1 AND B = 2
+WHERE A = 1 AND B = 2 AND C = 3
+
+-- ❌ Не работает:
+WHERE B = 2            -- нет A
+WHERE C = 3            -- нет A
+WHERE B = 2 AND C = 3  -- нет A
+```
+
+### Профилирование запросов
+
+```sql
+-- Включение профилирования
+SET profiling = 1;
+
+-- Выполнение запроса
+SELECT * FROM players WHERE username = 'alex';
+
+-- Просмотр профиля
+SHOW PROFILES;
+SHOW PROFILE FOR QUERY 1;
+
+-- Детальная статистика
+SHOW PROFILE CPU, BLOCK IO, MEMORY FOR QUERY 1;
+
+-- Отключение
+SET profiling = 0;
+```
+
+### Медленные запросы
+
+```sql
+-- Включение медленного лога
+SET GLOBAL slow_query_log = 'ON';
+SET GLOBAL long_query_time = 1;  -- секунды
+SET GLOBAL slow_query_log_file = '/var/log/mysql/slow.log';
+
+-- Проверка статуса
+SHOW VARIABLES LIKE 'slow_query_log%';
+SHOW VARIABLES LIKE 'long_query_time';
+
+-- Анализ медленных запросов (в терминале)
+-- mysqldumpslow /var/log/mysql/slow.log
+-- pt-query-digest /var/log/mysql/slow.log
+```
+
+### Обслуживание индексов
+
+```sql
+-- Анализ таблицы (обновление статистики)
+ANALYZE TABLE players;
+
+-- Проверка таблицы
+CHECK TABLE players;
+
+-- Оптимизация таблицы (дефрагментация)
+OPTIMIZE TABLE players;
+
+-- Удаление неиспользуемого индекса
+DROP INDEX idx_unused ON players;
+
+-- Проверка дубликатов индексов
+SELECT 
+    TABLE_NAME,
+    INDEX_NAME,
+    GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = 'quiz_db'
+GROUP BY TABLE_NAME, INDEX_NAME
+HAVING COUNT(*) > 1;
+```
 
 ---
 
