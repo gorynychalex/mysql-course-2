@@ -118,13 +118,27 @@ DROP DATABASE IF EXISTS database_name;
 ### Базовый синтаксис CREATE TABLE
 
 ```sql
-CREATE TABLE table_name (
-    column1_name datatype [constraints],
+CREATE TABLE [IF NOT EXISTS] table_name (
+    column1_name datatype [UNSIGNED] [DEFAULT value] [NOT NULL] [UNIQUE] [COMMENT 'text'],
     column2_name datatype [constraints],
     ...
-    table_constraints
-) ENGINE=storage_engine DEFAULT CHARSET=charset;
+    [PRIMARY KEY (column)],
+    [INDEX index_name (column)],
+    [FOREIGN KEY (column) REFERENCES other_table(column)],
+    [UNIQUE KEY (column)]
+) [ENGINE=storage_engine] [DEFAULT CHARSET=charset] [COLLATE=collation] [COMMENT='table comment'];
 ```
+
+**Параметры:**
+- `IF NOT EXISTS` — создать только если таблица не существует
+- `ENGINE` — движок таблицы (InnoDB, MyISAM, MEMORY, ARCHIVE)
+- `DEFAULT CHARSET` — кодировка по умолчанию (utf8mb4)
+- `COLLATE` — правила сравнения (utf8mb4_unicode_ci)
+- `COMMENT` — описание таблицы
+- `PRIMARY KEY` — первичный ключ
+- `INDEX` — индекс для ускорения поиска
+- `FOREIGN KEY` — внешний ключ для связей
+- `UNIQUE KEY` — уникальное ограничение
 
 ### Пример создания таблицы
 
@@ -197,6 +211,26 @@ CREATE TABLE questions (
 
 ### Создание временной таблицы
 
+**Синтаксис CREATE TEMPORARY TABLE:**
+```sql
+CREATE [TEMPORARY] TABLE [IF NOT EXISTS] table_name (
+    column_definitions
+) [ENGINE=storage_engine];
+
+CREATE TEMPORARY TABLE [IF NOT EXISTS] table_name AS SELECT ...;
+```
+
+**Параметры:**
+- `TEMPORARY` — создать временную таблицу (удаляется после завершения сессии)
+- `IF NOT EXISTS` — создать только если таблица не существует
+- `AS SELECT` — создать таблицу на основе результата запроса
+
+**Особенности временных таблиц:**
+- Видны только в текущей сессии (подключении)
+- Автоматически удаляются при закрытии соединения
+- Можно создать таблицу с тем же именем в разных сессиях
+- Полезны для промежуточных вычислений
+
 ```sql
 -- Создание временной таблицы
 CREATE TEMPORARY TABLE temp_results (
@@ -267,6 +301,47 @@ SELECT * FROM player_stats WHERE games_count > 5;
 
 ### Создание индексов
 
+**Синтаксис CREATE INDEX:**
+```sql
+-- Создание индекса в существующей таблице
+CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX index_name
+ON table_name (column1 [ASC|DESC], column2 [ASC|DESC], ...)
+[USING BTREE|HASH]
+[ALGORITHM=DEFAULT|INPLACE|COPY];
+
+-- Создание индекса при создании таблицы
+CREATE TABLE table_name (
+    ...
+    INDEX index_name (column),
+    UNIQUE KEY unique_name (column),
+    FULLTEXT INDEX ft_name (column)
+);
+
+-- Удаление индекса
+DROP INDEX index_name ON table_name;
+```
+
+**Параметры:**
+- `UNIQUE` — уникальное значение (запрет дубликатов)
+- `FULLTEXT` — полнотекстовый индекс для поиска по тексту
+- `SPATIAL` — пространственный индекс для GIS данных
+- `USING BTREE` — B-дерево (по умолчанию, для диапазонных запросов)
+- `USING HASH` — хэш-индекс (для точных совпадений)
+- `ALGORITHM` — алгоритм создания (INPLACE — без блокировки, COPY — с копированием)
+- `ASC/DESC` — порядок сортировки (по возрастанию/убыванию)
+
+**Когда создавать индексы:**
+- ✅ Столбцы в WHERE
+- ✅ Столбцы в JOIN
+- ✅ Столбцы в ORDER BY
+- ✅ Столбцы в GROUP BY
+- ✅ Внешние ключи
+
+**Когда НЕ создавать:**
+- ❌ Таблицы с частыми INSERT/UPDATE/DELETE
+- ❌ Столбцы с низкой селективностью (пол, статус)
+- ❌ Маленькие таблицы
+
 ```sql
 -- При создании таблицы
 CREATE TABLE players (
@@ -286,8 +361,11 @@ CREATE INDEX idx_email ON players(email);
 -- Уникальный индекс
 CREATE UNIQUE INDEX idx_unique_email ON players(email);
 
--- Составной индекс
+-- Составной индекс (для запросов с несколькими условиями)
 CREATE INDEX idx_player_stats ON players(username, total_score);
+
+-- Полнотекстовый индекс для поиска по вопросам
+CREATE FULLTEXT INDEX ft_question ON questions(question_text);
 ```
 
 ### Просмотр индексов
@@ -404,6 +482,54 @@ SHOW VARIABLES LIKE 'innodb_ft_min_token_size';
 ### ALTER TABLE
 
 **ALTER TABLE** — оператор для изменения структуры существующей таблицы.
+
+**Базовый синтаксис ALTER TABLE:**
+```sql
+-- Добавление столбца
+ALTER TABLE table_name
+    ADD [COLUMN] column_name datatype [constraints] [FIRST|AFTER column];
+
+-- Изменение столбца
+ALTER TABLE table_name
+    MODIFY [COLUMN] column_name datatype [constraints];
+
+-- Переименование столбца
+ALTER TABLE table_name
+    CHANGE [COLUMN] old_name new_name datatype [constraints];
+
+-- Удаление столбца
+ALTER TABLE table_name
+    DROP [COLUMN] column_name;
+
+-- Добавление индекса/ключа
+ALTER TABLE table_name
+    ADD [INDEX|KEY|UNIQUE|FULLTEXT] index_name (column_list);
+
+-- Удаление индекса/ключа
+ALTER TABLE table_name
+    DROP INDEX index_name;
+    DROP PRIMARY KEY;
+    DROP FOREIGN KEY fk_name;
+
+-- Переименование таблицы
+ALTER TABLE old_name RENAME [TO] new_name;
+
+-- Изменение движка и кодировки
+ALTER TABLE table_name
+    ENGINE=engine_name,
+    CONVERT TO CHARACTER SET charset COLLATE collation;
+```
+
+**Параметры:**
+- `ADD COLUMN` — добавить новый столбец
+- `MODIFY COLUMN` — изменить тип/ограничения столбца (без переименования)
+- `CHANGE COLUMN` — переименовать столбец и/или изменить тип
+- `DROP COLUMN` — удалить столбец
+- `FIRST` — добавить столбец первым
+- `AFTER column` — добавить столбец после указанного
+- `RENAME TO` — переименовать таблицу
+- `CONVERT TO CHARACTER SET` — изменить кодировку таблицы и столбцов
+- `ENGINE` — изменить движок таблицы
 
 ### Добавление столбца
 

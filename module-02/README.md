@@ -31,6 +31,17 @@
 
 ### Примеры использования:
 
+**Синтаксис объявления числовых столбцов:**
+```sql
+column_name DATA_TYPE [UNSIGNED] [DEFAULT значение] [NOT NULL] [COMMENT 'описание']
+```
+
+**Параметры:**
+- `UNSIGNED` — только неотрицательные значения (диапазон с 0)
+- `DEFAULT` — значение по умолчанию при вставке
+- `NOT NULL` — запрет NULL значений
+- `COMMENT` — описание столбца
+
 ```sql
 -- Количество очков за вопрос (1-100)
 points TINYINT UNSIGNED
@@ -60,6 +71,20 @@ total_score DECIMAL(10,2)
 
 ### Примеры использования:
 
+**Синтаксис объявления строковых столбцов:**
+```sql
+column_name VARCHAR(N) [CHARACTER SET charset] [COLLATE collation] [DEFAULT 'значение'] [NOT NULL]
+```
+
+**Параметры:**
+- `VARCHAR(N)` — строка переменной длины, N — максимальная длина
+- `CHAR(N)` — строка фиксированной длины
+- `TEXT` — текстовое поле (не требует указания длины)
+- `ENUM('val1','val2')` — перечисление, можно выбрать только одно значение
+- `SET('val1','val2')` — множество, можно выбрать несколько значений
+- `CHARACTER SET` — кодировка (обычно utf8mb4)
+- `COLLATE` — правила сравнения (обычно utf8mb4_unicode_ci)
+
 ```sql
 -- Слаг категории (фиксированная длина)
 slug CHAR(50)
@@ -88,6 +113,21 @@ question_types SET('single_choice', 'multiple_choice', 'true_false', 'text_input
 | **YEAR** | YYYY | 1901 до 2155 | 1 байт |
 
 ### Примеры использования:
+
+**Синтаксис объявления столбцов даты и времени:**
+```sql
+column_name DATE|TIME|DATETIME|TIMESTAMP|YEAR [DEFAULT CURRENT_TIMESTAMP] [ON UPDATE CURRENT_TIMESTAMP] [NOT NULL]
+```
+
+**Параметры:**
+- `DATE` — только дата (YYYY-MM-DD)
+- `TIME` — только время (HH:MM:SS)
+- `DATETIME` — дата и время (без привязки к часовому поясу)
+- `TIMESTAMP` — дата и время (с привязкой к UTC, автоматическое обновление)
+- `YEAR` — только год (YYYY)
+- `DEFAULT CURRENT_TIMESTAMP` — установить текущую дату/время при создании
+- `ON UPDATE CURRENT_TIMESTAMP` — обновлять при изменении записи
+- `NOT NULL` — запрет NULL значений
 
 ```sql
 -- Дата рождения игрока

@@ -49,25 +49,72 @@ WHERE ROUTINE_SCHEMA = 'database_name';
 
 ## 2. Хранимые процедуры
 
-### Создание процедуры
-
+**Синтаксис CREATE PROCEDURE:**
 ```sql
 DELIMITER //
 
-CREATE PROCEDURE procedure_name(
-    IN param1 datatype,
-    IN param2 datatype,
-    OUT result datatype
+CREATE [DEFINER = {user | CURRENT_USER}]
+PROCEDURE procedure_name(
+    [IN | OUT | INOUT] param_name datatype [, ...]
 )
+[COMMENT 'описание']
+[LANGUAGE SQL]
+[DETERMINISTIC | NOT DETERMINISTIC]
+[SQL SECURITY {DEFINER | INVOKER}]
 BEGIN
-    -- Тело процедуры
-    SELECT column INTO result FROM table WHERE id = param1;
+    -- Объявление переменных
+    DECLARE variable_name datatype [DEFAULT value];
+
+    -- Обработчики ошибок
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+    BEGIN
+        -- код обработки
+    END;
+
+    -- Логика процедуры
+    SQL statements;
+
+    -- Присваивание значений OUT параметрам
+    SET out_param = value;
 END//
 
 DELIMITER ;
 ```
 
-### Примеры процедур
+**Параметры:**
+- `DEFINER` — пользователь от имени которого выполняется процедура
+- `IN` — входной параметр (передаётся в процедуру)
+- `OUT` — выходной параметр (возвращается из процедуры)
+- `INOUT` — входной и выходной параметр
+- `COMMENT` — описание процедуры
+- `DETERMINISTIC` — процедура всегда возвращает одинаковый результат
+- `NOT DETERMINISTIC` — результат может отличаться (по умолчанию)
+- `SQL SECURITY` — чьи привилегии использовать
+
+**Особенности:**
+- Требуют изменения разделителя (DELIMITER)
+- Могут иметь несколько OUT параметров
+- Могут возвращать несколько наборов результатов
+- Могут содержать сложную логику с условиями и циклами
+- Не возвращают значение напрямую (в отличие от функций)
+
+**Вызов процедуры:**
+```sql
+-- Процедура без параметров
+CALL procedure_name();
+
+-- Процедура с IN параметрами
+CALL procedure_name(value1, value2);
+
+-- Процедура с OUT параметром
+CALL procedure_name(IN_value, @out_var);
+SELECT @out_var;
+
+-- Удаление процедуры
+DROP PROCEDURE [IF EXISTS] procedure_name;
+```
+
+### Создание процедуры
 
 ```sql
 DELIMITER //
@@ -258,21 +305,64 @@ SELECT
 
 ## 7. Собственные функции
 
-### Создание функции
-
+**Синтаксис CREATE FUNCTION:**
 ```sql
 DELIMITER //
 
-CREATE FUNCTION function_name(param datatype)
+CREATE [DEFINER = {user | CURRENT_USER}]
+FUNCTION function_name(
+    param_name datatype [, param_name datatype ...]
+)
 RETURNS return_datatype
-DETERMINISTIC
+[DETERMINISTIC | NOT DETERMINISTIC]
+[READS SQL DATA | MODIFIES SQL DATA | CONTAINS SQL]
+[SQL SECURITY {DEFINER | INVOKER}]
+[COMMENT 'описание']
 BEGIN
-    DECLARE result datatype;
-    -- Логика
-    RETURN result;
+    -- Объявление переменных
+    DECLARE variable_name datatype [DEFAULT value];
+
+    -- Логика функции
+    SQL statements;
+
+    -- Возврат значения
+    RETURN value;
 END//
 
 DELIMITER ;
+```
+
+**Параметры:**
+- `DEFINER` — пользователь от имени которого выполняется функция
+- `RETURNS` — тип возвращаемого значения (обязательно)
+- `DETERMINISTIC` — функция всегда возвращает одинаковый результат для тех же входных данных
+- `NOT DETERMINISTIC` — результат может отличаться (по умолчанию)
+- `READS SQL DATA` — функция читает данные, но не модифицирует
+- `MODIFIES SQL DATA` — функция модифицирует данные
+- `CONTAINS SQL` — функция содержит SQL, но не читает и не модифицирует
+- `SQL SECURITY` — чьи привилегии использовать
+- `COMMENT` — описание функции
+
+**Особенности:**
+- Обязательно возвращает одно значение
+- Можно использовать в SELECT, WHERE, ORDER BY
+- Не может изменять данные таблицы (только READS SQL DATA)
+- Требует изменения разделителя (DELIMITER)
+- Может вызывать процедуры и другие функции
+
+**Использование:**
+```sql
+-- В SELECT
+SELECT function_name(param1, param2) AS alias;
+
+-- В WHERE
+SELECT * FROM table WHERE function_name(column) > value;
+
+-- В выражениях
+SELECT column, function_name(column) * 2 AS calculated FROM table;
+
+-- Удаление функции
+DROP FUNCTION [IF EXISTS] function_name;
 ```
 
 ### Примеры функций
@@ -402,19 +492,67 @@ DELIMITER ;
 
 ## 9. Создание триггеров
 
-### Синтаксис триггера
-
+**Синтаксис CREATE TRIGGER:**
 ```sql
+DELIMITER //
+
 CREATE TRIGGER trigger_name
 {BEFORE | AFTER} {INSERT | UPDATE | DELETE}
 ON table_name
 FOR EACH ROW
+[ORDER]  -- MySQL 8.0.17+
 BEGIN
-    -- Тело триггера
-END;
+    -- Объявление переменных
+    DECLARE variable_name datatype;
+
+    -- Логика триггера
+    -- Доступ к новым значениям: NEW.column_name
+    -- Доступ к старым значениям: OLD.column_name
+
+    -- Примеры операций:
+    -- SET NEW.column = value;  -- только в BEFORE
+    -- INSERT INTO ...;
+    -- UPDATE ...;
+    -- DELETE ...;
+END//
+
+DELIMITER ;
+
+-- Удаление триггера
+DROP TRIGGER [IF EXISTS] trigger_name;
+
+-- Просмотр триггеров
+SHOW TRIGGERS;
+SHOW CREATE TRIGGER trigger_name;
 ```
 
-### Примеры триггеров
+**Параметры:**
+- `BEFORE` — выполнить до операции (можно изменять NEW значения)
+- `AFTER` — выполнить после операции (нельзя изменять данные)
+- `INSERT` — срабатывает при вставке строки
+- `UPDATE` — срабатывает при обновлении строки
+- `DELETE` — срабатывает при удалении строки
+- `FOR EACH ROW` — выполняется для каждой затронутой строки
+- `ORDER` — порядок выполнения триггеров (MySQL 8.0.17+)
+
+**Псевдонимы:**
+- `NEW.column` — новое значение (доступно в BEFORE INSERT/UPDATE, AFTER INSERT/UPDATE)
+- `OLD.column` — старое значение (доступно в BEFORE UPDATE/DELETE, AFTER UPDATE/DELETE)
+
+**Ограничения:**
+- Нельзя вызывать COMMIT, ROLLBACK (неявная транзакция)
+- Нельзя изменять таблицу, на которой установлен триггер
+- Нельзя использовать динамический SQL
+- Ошибка в триггере отменяет всю операцию
+
+**Применение:**
+- Аудит и логирование изменений
+- Проверка сложных ограничений
+- Автоматическое вычисление значений
+- Каскадные обновления
+- Поддержание денормализованных данных
+
+### Синтаксис триггера
 
 ```sql
 DELIMITER //

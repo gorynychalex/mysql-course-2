@@ -51,18 +51,41 @@ DELETE FROM questions WHERE id = 1;
 
 ### Базовый синтаксис INSERT
 
+**Синтаксис INSERT:**
 ```sql
 -- Вставка одной строки
-INSERT INTO table_name (column1, column2, column3)
-VALUES (value1, value2, value3);
+INSERT [IGNORE] [INTO] table_name
+    [(column1, column2, ..., columnN)]
+    VALUES (value1, value2, ..., valueN);
 
 -- Вставка нескольких строк
-INSERT INTO table_name (column1, column2, column3)
-VALUES 
-    (value1, value2, value3),
-    (value4, value5, value6),
-    (value7, value8, value9);
+INSERT [IGNORE] [INTO] table_name
+    [(column1, column2, ..., columnN)]
+    VALUES
+        (value1_1, value1_2, ..., value1_N),
+        (value2_1, value2_2, ..., value2_N),
+        ...;
+
+-- Вставка из SELECT
+INSERT [IGNORE] [INTO] table_name [(columns)]
+    SELECT ...;
+
+-- Вставка с обновлением при конфликте
+INSERT INTO table_name (columns) VALUES (values)
+    ON DUPLICATE KEY UPDATE column=value;
 ```
+
+**Параметры:**
+- `IGNORE` — игнорировать ошибки (дубликаты, NULL в NOT NULL)
+- `INTO` — необязательное ключевое слово
+- `DEFAULT` — использовать значение по умолчанию
+- `VALUES` — список значений для вставки
+- `ON DUPLICATE KEY UPDATE` — обновить при конфликте уникального ключа
+
+**Правила:**
+- Порядок значений должен соответствовать порядку столбцов
+- Можно не указывать столбцы с AUTO_INCREMENT и DEFAULT
+- TEXT и BLOB нельзя использовать в VALUES по умолчанию
 
 ### Примеры INSERT
 
@@ -187,18 +210,37 @@ LINES TERMINATED BY '\n';
 
 ### Базовый синтаксис UPDATE
 
+**Синтаксис UPDATE:**
 ```sql
 -- Обновление одной таблицы
-UPDATE table_name
-SET column1 = value1, column2 = value2
-WHERE condition;
+UPDATE [LOW_PRIORITY] [IGNORE] table_name [AS alias]
+SET column1 = value1 [, column2 = value2, ...]
+[WHERE condition]
+[ORDER BY column [ASC|DESC]]
+[LIMIT row_count];
 
--- Обновление с JOIN
-UPDATE t1
-JOIN t2 ON t1.id = t2.t1_id
-SET t1.column = value
-WHERE t2.condition;
+-- Обновление с JOIN (несколько таблиц)
+UPDATE [LOW_PRIORITY] [IGNORE] table1 [AS alias1]
+    JOIN table2 [AS alias2] ON join_condition
+    [JOIN table3 ON join_condition ...]
+SET table1.column = value1, table2.column = value2
+[WHERE condition]
+[LIMIT row_count];
 ```
+
+**Параметры:**
+- `LOW_PRIORITY` — отложить выполнение до завершения чтений
+- `IGNORE` — игнорировать ошибки обновления
+- `SET` — присвоить новые значения столбцам
+- `WHERE` — условие для выбора строк (без него обновятся ВСЕ строки!)
+- `ORDER BY` — порядок обновления строк
+- `LIMIT` — ограничить количество обновляемых строк
+- `JOIN` — обновление по нескольким таблицам
+
+**Важно:**
+- Всегда используйте WHERE, если не хотите обновить все строки
+- ORDER BY полезен с LIMIT для обновления конкретных строк
+- При обновлении с JOIN можно обновлять столбцы обеих таблиц
 
 ### Примеры UPDATE
 
@@ -248,22 +290,37 @@ END;
 
 ### Базовый синтаксис DELETE
 
+**Синтаксис DELETE:**
 ```sql
--- Удаление с условием
-DELETE FROM table_name WHERE condition;
+-- Удаление из одной таблицы
+DELETE [LOW_PRIORITY] [QUICK] [IGNORE] FROM table_name [AS alias]
+[WHERE condition]
+[ORDER BY column [ASC|DESC]]
+[LIMIT row_count];
 
--- Удаление всех записей
-DELETE FROM table_name;
-
--- Удаление с LIMIT
-DELETE FROM table_name WHERE condition LIMIT 10;
-
--- Удаление с ORDER BY
-DELETE FROM table_name 
-WHERE condition 
-ORDER BY column 
-LIMIT 10;
+-- Удаление из нескольких таблиц (с JOIN)
+DELETE [LOW_PRIORITY] [QUICK] [IGNORE]
+    table1_alias [, table2_alias ...]
+FROM table1 [AS alias1]
+    JOIN table2 [AS alias2] ON join_condition
+    [JOIN table3 ON join_condition ...]
+[WHERE condition]
+[LIMIT row_count];
 ```
+
+**Параметры:**
+- `LOW_PRIORITY` — отложить выполнение до завершения чтений
+- `QUICK` — не объединять индексы (быстрее для MyISAM)
+- `IGNORE` — игнорировать ошибки удаления
+- `WHERE` — условие для выбора строк (без него удалятся ВСЕ строки!)
+- `ORDER BY` — порядок удаления строк
+- `LIMIT` — ограничить количество удаляемых строк
+- `table1_alias` — псевдонимы таблиц для удаления из нескольких
+
+**Важно:**
+- Всегда используйте WHERE, если не хотите удалить все строки
+- При удалении с JOIN укажите, из каких таблиц удалять
+- FOREIGN KEY с ON DELETE CASCADE автоматически удалит дочерние строки
 
 ### Примеры DELETE
 
@@ -308,15 +365,48 @@ TRUNCATE TABLE temp_table;
 
 ### Базовый синтаксис SELECT
 
+**Синтаксис SELECT:**
 ```sql
-SELECT [DISTINCT] column1, column2, ...
-FROM table_name
-WHERE condition
-GROUP BY columns
-HAVING condition
-ORDER BY columns
-LIMIT offset, count;
+SELECT
+    [ALL | DISTINCT | DISTINCTROW]
+    [HIGH_PRIORITY]
+    [STRAIGHT_JOIN]
+    [SQL_SMALL_RESULT] [SQL_BIG_RESULT] [SQL_BUFFER_RESULT]
+    [SQL_CACHE | SQL_NO_CACHE] [SQL_CALC_FOUND_ROWS]
+    select_expression [, select_expression ...]
+FROM table_reference
+[WHERE where_condition]
+[GROUP BY {col_name | expr | position} [ASC | DESC], ...]
+    [WITH ROLLUP]
+[HAVING where_condition]
+[ORDER BY {col_name | expr | position} [ASC | DESC], ...]
+[LIMIT {[offset,] row_count | row_count OFFSET offset}]
+[PROCEDURE procedure_name]
+[INTO OUTFILE | DUMPFILE | INFILE]
+[FOR UPDATE | LOCK IN SHARE MODE];
 ```
+
+**Основные параметры:**
+- `ALL` — все строки (по умолчанию)
+- `DISTINCT` — только уникальные строки
+- `HIGH_PRIORITY` — высокий приоритет выполнения
+- `SQL_CALC_FOUND_ROWS` — подсчитать общее количество строк
+- `WHERE` — фильтрация строк
+- `GROUP BY` — группировка результатов
+- `HAVING` — фильтрация групп
+- `ORDER BY` — сортировка результатов
+- `LIMIT` — ограничение количества строк
+- `OFFSET` — пропустить N строк перед началом
+- `FOR UPDATE` — блокировка выбранных строк
+
+**Порядок выполнения:**
+1. FROM — выборка таблиц
+2. WHERE — фильтрация строк
+3. GROUP BY — группировка
+4. HAVING — фильтрация групп
+5. SELECT — выборка столбцов
+6. ORDER BY — сортировка
+7. LIMIT — ограничение
 
 ### Примеры SELECT
 

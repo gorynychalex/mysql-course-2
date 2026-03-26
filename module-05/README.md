@@ -16,48 +16,89 @@
 
 ### UNION vs UNION ALL
 
+**Синтаксис UNION:**
 ```sql
--- UNION: уникальные строки (удаляет дубликаты)
-SELECT column FROM table1
-UNION
-SELECT column FROM table2;
-
--- UNION ALL: все строки (включая дубликаты)
-SELECT column FROM table1
-UNION ALL
-SELECT column FROM table2;
+-- Базовый синтаксис
+SELECT columns FROM table1
+UNION [ALL | DISTINCT]
+SELECT columns FROM table2
+[UNION [ALL | DISTINCT] SELECT columns FROM table3 ...]
+[ORDER BY column [ASC|DESC]]
+[LIMIT [offset,] row_count];
 ```
+
+**Параметры:**
+- `UNION` — объединить результаты с удалением дубликатов (по умолчанию DISTINCT)
+- `UNION ALL` — объединить все строки, включая дубликаты (быстрее)
+- `UNION DISTINCT` — явно указать удаление дубликатов
+- `ORDER BY` — сортировка итогового результата
+- `LIMIT` — ограничение количества строк в результате
+
+**Требования к UNION:**
+- Одинаковое количество столбцов в каждом SELECT
+- Совместимые типы данных соответствующих столбцов
+- Псевдонимы столбцов берутся из первого SELECT
+- Порядок столбцов должен совпадать
+
+**Производительность:**
+- `UNION ALL` быстрее, так как не удаляет дубликаты
+- `UNION` требует сортировки для удаления дубликатов
+- Используйте `UNION ALL`, если дубликатов нет или они не важны
 
 ### Примеры UNION
-
-```sql
--- Объединение списков игроков
-SELECT username, email, 'player' AS type FROM players
-UNION
-SELECT username, email, 'admin' AS type FROM admins
-ORDER BY email;
-
--- Поиск по нескольким таблицам
-SELECT question_id, 'session' AS source, created_at AS date FROM session_answers
-UNION ALL
-SELECT question_id, 'practice' AS source, created_at AS date FROM practice_answers
-ORDER BY date DESC;
-
--- UNION с разным количеством столбцов
-SELECT id, question_text, category_id, NULL AS reason FROM questions
-UNION ALL
-SELECT id, question_text, category_id, ban_reason FROM banned_questions;
-```
-
-### Требования к UNION
-
-- Одинаковое количество столбцов
-- Совместимые типы данных
-- Псевдонимы берутся из первого SELECT
 
 ---
 
 ## 2. Подзапросы
+
+**Синтаксис подзапросов:**
+```sql
+-- Подзапрос в WHERE
+SELECT columns FROM table
+WHERE column [NOT] IN (SELECT column FROM table WHERE condition);
+
+WHERE column [operator] (SELECT column FROM table);
+-- operator: =, !=, <, <=, >, >=, ANY, SOME, ALL
+
+-- Подзапрос в FROM (производная таблица)
+SELECT outer_columns
+FROM (SELECT inner_columns FROM table WHERE condition) AS alias
+WHERE outer_condition;
+
+-- Подзапрос в SELECT (скалярный подзапрос)
+SELECT
+    column,
+    (SELECT aggregate_function(column) FROM table WHERE condition) AS alias
+FROM table;
+
+-- Коррелированный подзапрос
+SELECT outer_columns
+FROM table AS outer
+WHERE EXISTS (
+    SELECT 1 FROM table AS inner
+    WHERE inner.foreign_key = outer.primary_key
+);
+```
+
+**Типы подзапросов:**
+- **Одиночный** — возвращает одно значение (скалярный)
+- **Строковый** — возвращает одну строку
+- **Табличный** — возвращает таблицу
+- **Коррелированный** — зависит от внешнего запроса
+- **Некоррелированный** — выполняется один раз
+
+**Параметры:**
+- `IN` — проверка вхождения в список значений
+- `NOT IN` — проверка отсутствия в списке
+- `ANY/SOME` — сравнение с любым значением из списка
+- `ALL` — сравнение со всеми значениями
+- `EXISTS` — проверка существования строк
+- `NOT EXISTS` — проверка отсутствия строк
+
+**Производительность:**
+- Коррелированные подзапросы выполняются для каждой строки внешнего запроса
+- Часто можно заменить на JOIN для лучшей производительности
+- EXISTS быстрее IN для больших наборов данных
 
 ### Подзапросы в WHERE
 
@@ -135,6 +176,33 @@ WHERE EXISTS (
 
 ## 3. Оператор EXISTS
 
+**Синтаксис EXISTS:**
+```sql
+-- Проверка существования строк
+SELECT columns FROM table
+WHERE [NOT] EXISTS (
+    SELECT 1 FROM related_table
+    WHERE related_table.foreign_key = table.primary_key
+    [AND additional_conditions]
+);
+```
+
+**Параметры:**
+- `EXISTS` — возвращает TRUE если подзапрос вернул хотя бы одну строку
+- `NOT EXISTS` — возвращает TRUE если подзапрос не вернул ни одной строки
+- `SELECT 1` — стандартный паттерн, выбираем константу (не важно что выбирать)
+
+**Особенности:**
+- EXISTS возвращает BOOLEAN (TRUE/FALSE)
+- Подзапрос выполняется для каждой строки внешнего запроса
+- Обычно быстрее чем IN для больших наборов данных
+- Полезен для проверки связей между таблицами
+
+**EXISTS vs IN:**
+- `EXISTS` — проверка существования, быстрее на больших данных
+- `IN` — проверка вхождения, лучше для маленьких списков
+- `NOT EXISTS` — проверка отсутствия, быстрее чем `NOT IN`
+
 ### EXISTS vs IN
 
 ```sql
@@ -176,6 +244,58 @@ WHERE NOT EXISTS (
 ---
 
 ## 4. Представления (VIEW)
+
+**Синтаксис CREATE VIEW:**
+```sql
+-- Создание представления
+CREATE [OR REPLACE]
+[ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
+[DEFINER = {user | CURRENT_USER}]
+[SQL SECURITY {DEFINER | INVOKER}]
+VIEW view_name [(column_list)]
+AS select_statement
+[WITH [CASCADED | LOCAL] CHECK OPTION];
+
+-- Обновление представления
+CREATE OR REPLACE VIEW view_name AS select_statement;
+
+-- Удаление представления
+DROP VIEW [IF EXISTS] view_name [, view_name ...];
+
+-- Показать создание представления
+SHOW CREATE VIEW view_name;
+
+-- Показать все представления
+SHOW FULL TABLES WHERE TABLE_TYPE = 'VIEW';
+```
+
+**Параметры:**
+- `OR REPLACE` — заменить существующее представление
+- `ALGORITHM` — алгоритм выполнения:
+  - `UNDEFINED` — MySQL выбирает автоматически (по умолчанию)
+  - `MERGE` — сливает запрос с представлением (быстрее)
+  - `TEMPTABLE` — создаёт временную таблицу (медленнее)
+- `DEFINER` — пользователь от имени которого выполняется представление
+- `SQL SECURITY` — чьи привилегии использовать (DEFINER или INVOKER)
+- `WITH CHECK OPTION` — проверять данные при вставке/обновлении через VIEW
+
+**Типы представлений:**
+- **Простые** — один SELECT без GROUP BY, агрегатов
+- **Сложные** — с JOIN, GROUP BY, агрегатными функциями
+- **Обновляемые** — можно делать INSERT/UPDATE/DELETE
+- **Только для чтения** — нельзя изменять данные
+
+**Ограничения:**
+- Нельзя использовать ORDER BY без LIMIT
+- Нельзя использовать GROUP BY с агрегатами для обновляемых VIEW
+- Нельзя использовать подзапросы в FROM
+- Нельзя использовать временные таблицы
+
+**Преимущества:**
+- Упрощение сложных запросов
+- Безопасность (доступ только к определённым столбцам)
+- Сокрытие сложности структуры БД
+- Переиспользование кода
 
 ### Создание представлений
 

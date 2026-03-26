@@ -122,22 +122,67 @@ END IF;
 
 ### Управление транзакциями
 
+**Синтаксис управления транзакциями:**
 ```sql
 -- Начало транзакции
 START TRANSACTION;
 -- или
 BEGIN;
+-- или
+BEGIN WORK;
 
 -- Фиксация изменений
 COMMIT;
+-- или
+COMMIT WORK;
 
 -- Откат изменений
 ROLLBACK;
+-- или
+ROLLBACK WORK;
 
--- Автофиксация (по умолчанию ON)
-SET AUTOCOMMIT = 0; -- Отключить
-SET AUTOCOMMIT = 1; -- Включить
+-- Точка сохранения
+SAVEPOINT savepoint_name;
+
+-- Откат к точке сохранения
+ROLLBACK TO [SAVEPOINT] savepoint_name;
+
+-- Удаление точки сохранения
+RELEASE [SAVEPOINT] savepoint_name;
+
+-- Управление автофиксацией
+SET AUTOCOMMIT = 0;  -- Отключить (требует явного COMMIT)
+SET AUTOCOMMIT = 1;  -- Включить (по умолчанию)
+
+-- Уровень изоляции для сессии
+SET [SESSION] TRANSACTION ISOLATION LEVEL
+    READ UNCOMMITTED |
+    READ COMMITTED |
+    REPEATABLE READ |
+    SERIALIZABLE;
+
+-- Уровень изоляции для следующей транзакции
+SET TRANSACTION ISOLATION LEVEL level;
 ```
+
+**Параметры:**
+- `START TRANSACTION` — начать новую транзакцию
+- `COMMIT` — зафиксировать все изменения
+- `ROLLBACK` — отменить все изменения
+- `SAVEPOINT` — создать точку для частичного отката
+- `AUTOCOMMIT` — автоматическая фиксация каждой операции
+- `ISOLATION LEVEL` — уровень изоляции транзакции
+
+**Уровни изоляции:**
+- `READ UNCOMMITTED` — грязное чтение (самый быстрый, наименее безопасный)
+- `READ COMMITTED` — чтение зафиксированных данных (Oracle, SQL Server default)
+- `REPEATABLE READ` — повторяемое чтение (MySQL/MariaDB default)
+- `SERIALIZABLE` — сериализуемость (самый медленный, наиболее безопасный)
+
+**Важно:**
+- DDL-операторы (CREATE, ALTER, DROP) автоматически фиксируют транзакцию
+- DML-операторы (INSERT, UPDATE, DELETE) требуют явного COMMIT
+- При ошибке в транзакции выполните ROLLBACK
 
 ### Пример транзакции
 
