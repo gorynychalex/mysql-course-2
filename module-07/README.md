@@ -643,452 +643,166 @@ SHOW VARIABLES LIKE 'innodb%';
 
 ## 6. Пример: Банковские операции
 
-### Схема базы данных банка
+### Таблица счетов (упрощённая схема)
 
 ```sql
--- Таблица счетов клиентов
 CREATE TABLE accounts (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL UNIQUE,
     balance DECIMAL(15,2) NOT NULL DEFAULT 0.00 CHECK (balance >= 0),
-    currency CHAR(3) DEFAULT 'RUB',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_user (user_id),
-    INDEX idx_balance (balance)
+    version INT UNSIGNED DEFAULT 0  -- Для оптимистичной блокировки
 ) ENGINE=InnoDB;
 
--- Таблица транзакций (история операций)
-CREATE TABLE transactions (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    from_account_id INT UNSIGNED,
-    to_account_id INT UNSIGNED NOT NULL,
-    amount DECIMAL(15,2) NOT NULL CHECK (amount > 0),
-    transaction_type ENUM('transfer', 'deposit', 'withdrawal', 'payment') NOT NULL,
-    status ENUM('pending', 'completed', 'failed', 'reversed') DEFAULT 'pending',
-    description VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP NULL,
-    FOREIGN KEY (from_account_id) REFERENCES accounts(id),
-    FOREIGN KEY (to_account_id) REFERENCES accounts(id),
-    INDEX idx_from (from_account_id),
-    INDEX idx_to (to_account_id),
-    INDEX idx_status (status),
-    INDEX idx_created (created_at)
-) ENGINE=InnoDB;
-
--- Таблица блокировок (для овердрафта и спорных операций)
-CREATE TABLE account_locks (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    account_id INT UNSIGNED NOT NULL,
-    lock_amount DECIMAL(15,2) NOT NULL,
-    lock_reason VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    released_at TIMESTAMP NULL,
-    FOREIGN KEY (account_id) REFERENCES accounts(id),
-    INDEX idx_account (account_id),
-    INDEX idx_released (released_at)
-) ENGINE=InnoDB;
+-- Тестовые данные
+INSERT INTO accounts (user_id, balance) VALUES
+(1, 10000.00),  -- Счёт 1: 10 000 руб
+(2, 5000.00),   -- Счёт 2: 5 000 руб
+(3, 7500.00);   -- Счёт 3: 7 500 руб
 ```
 
-### Пример 1: Перевод между счетами
+### Пример 1: Перевод между счетами (базовый)
 
 ```sql
 DELIMITER //
 
 CREATE PROCEDURE transfer_funds(
-    IN p_from_account INT,
-    IN p_to_account INT,
-    IN p_amount DECIMAL(15,2),
-    IN p_description VARCHAR(255),
-    OUT p_transaction_id BIGINT,
+    IN p_from INT, IN p_to INT, IN p_amount DECIMAL(15,2),
     OUT p_status VARCHAR(20)
 )
 BEGIN
-    DECLARE v_from_balance DECIMAL(15,2);
-    DECLARE v_locked_amount DECIMAL(15,2) DEFAULT 0;
-    DECLARE v_available_balance DECIMAL(15,2);
+    DECLARE v_balance DECIMAL(15,2);
     
-    -- Обработчик ошибок
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        SET p_status = 'failed';
-        SET p_transaction_id = NULL;
-    END;
+    BEGIN ROLLBACK; SET p_status = 'failed'; END;
     
     START TRANSACTION;
     
-    -- Получаем баланс с блокировкой строки
-    SELECT balance INTO v_from_balance
-    FROM accounts
-    WHERE id = p_from_account
-    FOR UPDATE;
+    -- Блокировка строки отправителя
+    SELECT balance INTO v_balance FROM accounts
+    WHERE id = p_from FOR UPDATE;
     
-    -- Получаем сумму блокировок
-    SELECT COALESCE(SUM(lock_amount), 0) INTO v_locked_amount
-    FROM account_locks
-    WHERE account_id = p_from_account AND released_at IS NULL;
-    
-    -- Вычисляем доступный баланс
-    SET v_available_balance = v_from_balance - v_locked_amount;
-    
-    -- Проверяем достаточность средств
-    IF v_available_balance < p_amount THEN
+    IF v_balance < p_amount THEN
         ROLLBACK;
         SET p_status = 'insufficient_funds';
-        SET p_transaction_id = NULL;
     ELSE
-        -- Списываем со счёта отправителя
-        UPDATE accounts
-        SET balance = balance - p_amount
-        WHERE id = p_from_account;
-        
-        -- Зачисляем на счёт получателя
-        UPDATE accounts
-        SET balance = balance + p_amount
-        WHERE id = p_to_account;
-        
-        -- Создаём запись о транзакции
-        INSERT INTO transactions (
-            from_account_id,
-            to_account_id,
-            amount,
-            transaction_type,
-            status,
-            description,
-            processed_at
-        ) VALUES (
-            p_from_account,
-            p_to_account,
-            p_amount,
-            'transfer',
-            'completed',
-            p_description,
-            NOW()
-        );
-        
-        SET p_transaction_id = LAST_INSERT_ID();
-        SET p_status = 'completed';
-        
+        UPDATE accounts SET balance = balance - p_amount WHERE id = p_from;
+        UPDATE accounts SET balance = balance + p_amount WHERE id = p_to;
         COMMIT;
+        SET p_status = 'completed';
     END IF;
 END//
 
 DELIMITER ;
 
 -- Использование:
-CALL transfer_funds(1, 2, 1000.00, 'Перевод другу', @txn_id, @status);
-SELECT @txn_id, @status;
+CALL transfer_funds(1, 2, 1000.00, @status);
+SELECT @status;
+SELECT * FROM accounts WHERE id IN (1, 2);
 ```
 
-### Пример 2: Внесение наличных (депозит)
+### Пример 2: Внесение наличных
 
 ```sql
 DELIMITER //
 
 CREATE PROCEDURE deposit_funds(
-    IN p_account_id INT,
-    IN p_amount DECIMAL(15,2),
-    IN p_description VARCHAR(255),
-    OUT p_transaction_id BIGINT,
+    IN p_account INT, IN p_amount DECIMAL(15,2),
     OUT p_status VARCHAR(20)
 )
 BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        SET p_status = 'failed';
-        SET p_transaction_id = NULL;
-    END;
+    BEGIN ROLLBACK; SET p_status = 'failed'; END;
     
     START TRANSACTION;
     
-    -- Проверяем существование счёта с блокировкой
-    SELECT id INTO @account_exists
-    FROM accounts
-    WHERE id = p_account_id
-    FOR UPDATE;
+    UPDATE accounts SET balance = balance + p_amount WHERE id = p_account;
     
-    IF @account_exists IS NULL THEN
-        ROLLBACK;
-        SET p_status = 'account_not_found';
-        SET p_transaction_id = NULL;
-    ELSE
-        -- Зачисляем на счёт
-        UPDATE accounts
-        SET balance = balance + p_amount
-        WHERE id = p_account_id;
-        
-        -- Создаём запись о транзакции
-        INSERT INTO transactions (
-            to_account_id,
-            amount,
-            transaction_type,
-            status,
-            description,
-            processed_at
-        ) VALUES (
-            p_account_id,
-            p_amount,
-            'deposit',
-            'completed',
-            p_description,
-            NOW()
-        );
-        
-        SET p_transaction_id = LAST_INSERT_ID();
-        SET p_status = 'completed';
-        
-        COMMIT;
-    END IF;
+    COMMIT;
+    SET p_status = 'completed';
 END//
 
 DELIMITER ;
+
+-- Использование:
+CALL deposit_funds(1, 5000.00, @status);
+SELECT @status, (SELECT balance FROM accounts WHERE id = 1);
 ```
 
-### Пример 3: Массовые выплаты (batch processing)
+### Пример 3: Оптимистичная блокировка
 
 ```sql
-DELIMITER //
-
-CREATE PROCEDURE process_batch_payments(
-    IN p_from_account INT,
-    IN p_payment_file_id INT,
-    OUT p_success_count INT,
-    OUT p_fail_count INT,
-    OUT p_status VARCHAR(20)
-)
-BEGIN
-    DECLARE v_done INT DEFAULT FALSE;
-    DECLARE v_to_account INT;
-    DECLARE v_amount DECIMAL(15,2);
-    DECLARE v_total_amount DECIMAL(15,2) DEFAULT 0;
-    DECLARE v_balance DECIMAL(15,2);
-    
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        SET p_status = 'failed';
-    END;
-    
-    START TRANSACTION;
-    
-    -- Получаем баланс с блокировкой
-    SELECT balance INTO v_balance
-    FROM accounts
-    WHERE id = p_from_account
-    FOR UPDATE;
-    
-    -- Курсор для файлов платежей
-    DECLARE payment_cursor CURSOR FOR
-        SELECT to_account, amount
-        FROM payment_file_items
-        WHERE file_id = p_payment_file_id
-        AND status = 'pending';
-    
-    OPEN payment_cursor;
-    
-    read_loop: LOOP
-        FETCH payment_cursor INTO v_to_account, v_amount;
-        
-        IF v_done THEN
-            LEAVE read_loop;
-        END IF;
-        
-        SET v_total_amount = v_total_amount + v_amount;
-        
-        -- Проверяем достаточность средств
-        IF v_total_amount > v_balance THEN
-            SET p_status = 'insufficient_funds';
-            LEAVE read_loop;
-        END IF;
-        
-        -- Зачисляем получателю
-        UPDATE accounts
-        SET balance = balance + v_amount
-        WHERE id = v_to_account;
-        
-        -- Обновляем статус платежа
-        UPDATE payment_file_items
-        SET status = 'processed', processed_at = NOW()
-        WHERE file_id = p_payment_file_id
-        AND to_account = v_to_account;
-        
-        SET p_success_count = p_success_count + 1;
-    END LOOP;
-    
-    CLOSE payment_cursor;
-    
-    IF p_status IS NULL OR p_status = 'completed' THEN
-        -- Списываем общую сумму со счёта отправителя
-        UPDATE accounts
-        SET balance = balance - v_total_amount
-        WHERE id = p_from_account;
-        
-        COMMIT;
-        SET p_status = 'completed';
-    ELSE
-        ROLLBACK;
-        SET p_fail_count = p_success_count;
-        SET p_success_count = 0;
-    END IF;
-END//
-
-DELIMITER ;
-```
-
-### Пример 4: Оптимистичная блокировка (Optimistic Locking)
-
-```sql
--- Таблица с версионированием
-CREATE TABLE accounts_optimistic (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id INT UNSIGNED NOT NULL,
-    balance DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-    version INT UNSIGNED DEFAULT 0,  -- Версия для оптимистичной блокировки
-    INDEX idx_user_version (user_id, version)
-) ENGINE=InnoDB;
-
--- Обновление с проверкой версии
 DELIMITER //
 
 CREATE PROCEDURE transfer_optimistic(
-    IN p_from_account INT,
-    IN p_to_account INT,
-    IN p_amount DECIMAL(15,2),
-    OUT p_success BOOLEAN,
-    OUT p_retries INT
+    IN p_from INT, IN p_to INT, IN p_amount DECIMAL(15,2),
+    OUT p_success BOOLEAN
 )
 BEGIN
-    DECLARE v_from_version INT;
-    DECLARE v_balance DECIMAL(15,2);
+    DECLARE v_balance, v_version INT;
     DECLARE v_affected INT;
     
-    SET p_retries = 0;
-    SET p_success = FALSE;
+    START TRANSACTION;
     
-    retry_loop: LOOP
-        START TRANSACTION;
-        
-        -- Получаем текущую версию и баланс
-        SELECT balance, version INTO v_balance, v_from_version
-        FROM accounts_optimistic
-        WHERE id = p_from_account;
-        
-        IF v_balance < p_amount THEN
-            ROLLBACK;
-            LEAVE retry_loop;
-        END IF;
-        
-        -- Обновляем с проверкой версии
-        UPDATE accounts_optimistic
-        SET balance = balance - p_amount,
-            version = version + 1
-        WHERE id = p_from_account
-        AND version = v_from_version;
+    SELECT balance, version INTO v_balance, v_version
+    FROM accounts WHERE id = p_from;
+    
+    IF v_balance >= p_amount THEN
+        UPDATE accounts
+        SET balance = balance - p_amount, version = version + 1
+        WHERE id = p_from AND version = v_version;
         
         SET v_affected = ROW_COUNT();
         
-        IF v_affected = 0 THEN
-            -- Конфликт версий, другая транзакция обновила строку
-            ROLLBACK;
-            SET p_retries = p_retries + 1;
-            
-            -- Максимум 3 попытки
-            IF p_retries >= 3 THEN
-                LEAVE retry_loop;
-            END IF;
-            
-            -- Небольшая пауза перед повторной попыткой
-            DO SLEEP(0.1);
-            ITERATE retry_loop;
+        IF v_affected > 0 THEN
+            UPDATE accounts SET balance = balance + p_amount WHERE id = p_to;
+            COMMIT;
+            SET p_success = TRUE;
+        ELSE
+            ROLLBACK;  -- Конфликт версии
+            SET p_success = FALSE;
         END IF;
-        
-        -- Зачисление получателю
-        UPDATE accounts_optimistic
-        SET balance = balance + p_amount,
-            version = version + 1
-        WHERE id = p_to_account;
-        
-        COMMIT;
-        SET p_success = TRUE;
-        LEAVE retry_loop;
-    END LOOP;
+    ELSE
+        ROLLBACK;
+        SET p_success = FALSE;
+    END IF;
 END//
 
 DELIMITER ;
 ```
 
-### Пример 5: Откат транзакции при ошибке
+### Пример 4: Откат при ошибке
 
 ```sql
 DELIMITER //
 
-CREATE PROCEDURE safe_transfer_with_rollback(
-    IN p_from_account INT,
-    IN p_to_account INT,
-    IN p_amount DECIMAL(15,2),
+CREATE PROCEDURE safe_transfer(
+    IN p_from INT, IN p_to INT, IN p_amount DECIMAL(15,2),
     OUT p_status VARCHAR(50)
 )
 BEGIN
     DECLARE v_balance DECIMAL(15,2);
-    DECLARE v_from_user INT;
-    DECLARE v_to_user INT;
     
-    -- Обработчик всех ошибок
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        GET DIAGNOSTICS CONDITION 1
-            @sqlstate = RETURNED_SQLSTATE,
-            @errno = MYSQL_ERRNO,
-            @msg = MESSAGE_TEXT;
-        
+        GET DIAGNOSTICS CONDITION 1 @msg = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status = CONCAT('Error: ', @msg);
     END;
     
     START TRANSACTION;
     
-    -- Блокируем оба счёта
-    SELECT user_id, balance INTO v_from_user, v_balance
-    FROM accounts WHERE id = p_from_account
-    FOR UPDATE;
+    SELECT balance INTO v_balance FROM accounts
+    WHERE id = p_from FOR UPDATE;
     
-    SELECT user_id INTO v_to_user
-    FROM accounts WHERE id = p_to_account
-    FOR UPDATE;
-    
-    -- Проверки
-    IF v_from_user IS NULL THEN
-        ROLLBACK;
-        SET p_status = 'Sender account not found';
-    ELSEIF v_to_user IS NULL THEN
-        ROLLBACK;
-        SET p_status = 'Recipient account not found';
-    ELSEIF v_balance < p_amount THEN
+    IF v_balance < p_amount THEN
         ROLLBACK;
         SET p_status = 'Insufficient funds';
-    ELSEIF p_from_account = p_to_account THEN
+    ELSEIF p_from = p_to THEN
         ROLLBACK;
-        SET p_status = 'Cannot transfer to same account';
-    ELSEIF p_amount <= 0 THEN
-        ROLLBACK;
-        SET p_status = 'Invalid amount';
+        SET p_status = 'Same account';
     ELSE
-        -- Все проверки пройдены, выполняем перевод
-        UPDATE accounts SET balance = balance - p_amount WHERE id = p_from_account;
-        UPDATE accounts SET balance = balance + p_amount WHERE id = p_to_account;
-        
-        INSERT INTO transactions (
-            from_account_id, to_account_id, amount,
-            transaction_type, status, processed_at
-        ) VALUES (
-            p_from_account, p_to_account, p_amount,
-            'transfer', 'completed', NOW()
-        );
-        
+        UPDATE accounts SET balance = balance - p_amount WHERE id = p_from;
+        UPDATE accounts SET balance = balance + p_amount WHERE id = p_to;
         COMMIT;
         SET p_status = 'completed';
     END IF;
@@ -1097,40 +811,26 @@ END//
 DELIMITER ;
 ```
 
-### Тестирование банковских операций
+### Демонстрация транзакций
 
 ```sql
--- Создаём тестовые счета
-INSERT INTO accounts (user_id, balance) VALUES
-(1, 10000.00),  -- Счёт 1: 10 000 руб
-(2, 5000.00),   -- Счёт 2: 5 000 руб
-(3, 7500.00);   -- Счёт 3: 7 500 руб
+-- Проверка балансов
+SELECT * FROM accounts;
 
 -- Тест 1: Успешный перевод
-CALL transfer_funds(1, 2, 1000.00, 'Оплата заказа', @txn_id, @status);
-SELECT @txn_id, @status;
-SELECT * FROM accounts WHERE id IN (1, 2);
+CALL transfer_funds(1, 2, 1000.00, @status);
+SELECT @status;  -- completed
 
 -- Тест 2: Недостаточно средств
-CALL transfer_funds(2, 3, 10000.00, 'Большой перевод', @txn_id, @status);
-SELECT @txn_id, @status;
+CALL transfer_funds(2, 3, 10000.00, @status);
+SELECT @status;  -- insufficient_funds
 
 -- Тест 3: Внесение наличных
-CALL deposit_funds(1, 5000.00, 'Пополнение через банкомат', @txn_id, @status);
-SELECT @txn_id, @status;
-SELECT balance FROM accounts WHERE id = 1;
+CALL deposit_funds(1, 5000.00, @status);
+SELECT @status, (SELECT balance FROM accounts WHERE id = 1);
 
--- Проверка истории транзакций
-SELECT 
-    t.id,
-    t.from_account_id,
-    t.to_account_id,
-    t.amount,
-    t.transaction_type,
-    t.status,
-    t.created_at
-FROM transactions t
-ORDER BY t.created_at DESC;
+-- Итоговые балансы
+SELECT * FROM accounts;
 ```
 
 ---
