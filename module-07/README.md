@@ -85,15 +85,17 @@ SELECT IS_FREE_LOCK('lock_name');
 
 ### Пример использования
 
+**Важно:** Для присваивания значения переменной используйте `SELECT ... INTO`, а не `AS`!
+
 ```sql
 -- Блокировка для предотвращения гонки
 START TRANSACTION;
 
--- Попытка получить блокировку
-SELECT GET_LOCK('question_1_lock', 10) AS lock_acquired;
+-- Попытка получить блокировку (ПРАВИЛЬНО: используем INTO)
+SELECT GET_LOCK('question_1_lock', 10) INTO @lock_acquired;
 
 -- Если блокировка получена (1)
-IF lock_acquired = 1 THEN
+IF @lock_acquired = 1 THEN
     -- Критическая секция
     UPDATE questions SET view_count = view_count + 1 WHERE id = 1;
 
@@ -106,6 +108,23 @@ ELSE
     ROLLBACK;
 END IF;
 ```
+
+**Альтернативный способ (через SET):**
+```sql
+START TRANSACTION;
+
+SET @lock_acquired = GET_LOCK('question_1_lock', 10);
+
+IF @lock_acquired = 1 THEN
+    UPDATE questions SET view_count = view_count + 1 WHERE id = 1;
+    SELECT RELEASE_LOCK('question_1_lock');
+    COMMIT;
+ELSE
+    ROLLBACK;
+END IF;
+```
+
+**Примечание:** `SELECT ... AS alias` создаёт псевдоним столбца в результате, а не переменную. Для присваивания используйте `SELECT ... INTO variable` или `SET variable = value`.
 
 ---
 

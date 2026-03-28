@@ -10,10 +10,15 @@
 4. Временные таблицы
 5. Индексы
    - Типы индексов
+   - Кластерные и некластерные индексы
    - Размер индексов (расчёт и проверка)
-   - Оптимизация запросов с индексами (EXPLAIN)
-6. Полнотекстовый индекс
-7. Оператор модификации ALTER
+6. Оператор EXPLAIN
+   - Синтаксис и поля вывода
+   - Типы доступа (type)
+   - Анализ примеров
+   - EXPLAIN FORMAT=JSON и ANALYZE
+7. Полнотекстовый индекс
+8. Оператор модификации ALTER
 
 ---
 
@@ -302,6 +307,186 @@ SELECT * FROM player_stats WHERE games_count > 5;
 | **SPATIAL** | Пространственный | SPATIAL (col) |
 | **COMPOSITE** | Составной индекс | INDEX (col1, col2) |
 
+### Кластерные и некластерные индексы
+
+**Важное различие по способу хранения данных:**
+
+#### Кластерный индекс (Clustered Index)
+
+**Определение:** Индекс, который определяет физический порядок хранения данных в таблице.
+
+```
+Кластерный индекс (PRIMARY KEY):
+┌─────────────────────────────────┐
+│ id │ username │ email          │  ← Данные хранятся В индексе
+├────┼──────────┼────────────────┤
+│ 1  │ alex     │ alex@test.com  │
+│ 2  │ maria    │ maria@test.com │  ← Строки отсортированы по id
+│ 3  │ ivan     │ ivan@test.com  │
+│ 4  │ olga     │ olga@test.com  │
+└─────────────────────────────────┘
+```
+
+**Особенности:**
+- Данные таблицы хранятся в структуре индекса (B-дерево)
+- Листовые узлы содержат полные строки данных
+- Только **ОДИН** кластерный индекс на таблицу (данные не могут быть отсортированы по-разному физически)
+- В InnoDB **PRIMARY KEY всегда кластерный**
+- Быстрый доступ к данным (не нужно дополнительное обращение к таблице)
+
+**В InnoDB:**
+```sql
+CREATE TABLE players (
+    id INT PRIMARY KEY,  -- ← Кластерный индекс (данные сортируются по id)
+    username VARCHAR(50),
+    email VARCHAR(100)
+) ENGINE=InnoDB;
+
+-- Физический порядок строк будет по id
+```
+
+**Если нет PRIMARY KEY:**
+1. InnoDB использует первый UNIQUE NOT NULL индекс
+2. Если нет UNIQUE — создаётся скрытый кластерный индекс (GEN_CLUST_INDEX)
+
+#### Некластерный индекс (Non-Clustered Index)
+
+**Определение:** Индекс, который хранится отдельно от данных таблицы.
+
+```
+Некластерный индекс (INDEX на username):
+┌─────────────────────┐      ┌─────────────────────────────────┐
+│ username │ id      │      │ id │ username │ email          │
+├──────────┼─────────┤      ├────┼──────────┼────────────────┤
+│ alex     │ 1       │──────│ 1  │ alex     │ alex@test.com  │
+│ ivan     │ 3       │──────│ 2  │ maria    │ maria@test.com │
+│ maria    │ 2       │──────│ 3  │ ivan     │ ivan@test.com  │
+│ olga     │ 4       │──────│ 4  │ olga     │ olga@test.com  │
+└─────────────────────┘      └─────────────────────────────────┘
+   Индекс                         Таблица (кластерный по id)
+```
+
+**Особенности:**
+- Хранится отдельно от данных таблицы
+- Листовые узлы содержат значения индекса + ссылку на строку (id)
+- Может быть **множество** некластерных индексов на таблицу
+- Требует дополнительного обращения к таблице (lookup)
+- В InnoDB все индексы кроме PRIMARY KEY — некластерные
+
+**В InnoDB:**
+```sql
+CREATE TABLE players (
+    id INT PRIMARY KEY,  -- Кластерный
+    username VARCHAR(50),
+    email VARCHAR(100),
+    INDEX idx_username (username)  -- ← Некластерный индекс
+) ENGINE=InnoDB;
+```
+
+#### Сравнение кластерного и некластерного
+
+| Характеристика | Кластерный | Некластерный |
+|---------------|------------|--------------|
+| **Количество** | Только 1 | Много |
+| **Хранение** | Данные в индексе | Отдельно от данных |
+| **Скорость SELECT** | Быстрее (нет lookup) | Медленнее (нужен lookup) |
+| **Скорость INSERT** | Медленнее (сортировка) | Быстрее |
+| **Скорость UPDATE ключа** | Медленная (пересортировка) | Быстрая |
+| **Размер** | Размер таблицы | Дополнительно 10-20% |
+| **В InnoDB** | PRIMARY KEY | Все остальные |
+
+#### Как это работает в MySQL
+
+**InnoDB (движок по умолчанию):**
+
+```sql
+CREATE TABLE questions (
+    id INT PRIMARY KEY,        -- Кластерный индекс
+    category_id INT,
+    question_text TEXT,
+    difficulty ENUM('easy', 'medium', 'hard'),
+    points DECIMAL(5,2),
+    
+    INDEX idx_category (category_id),     -- Некластерный
+    INDEX idx_difficulty (difficulty),    -- Некластерный
+    FULLTEXT INDEX ft_question (question_text)  -- Некластерный
+) ENGINE=InnoDB;
+```
+
+**Структура хранения:**
+
+```
+Кластерный индекс (PRIMARY KEY):
+┌──────────────────────────────────────────────┐
+│ id (ключ) │ category_id │ question_text │... │  ← Данные здесь
+├───────────┼─────────────┼───────────────┼────┤
+│ 1         │ 1           │ "Что такое... │... │
+│ 2         │ 1           │ "Какой опер...│... │
+│ 3         │ 2           │ "Что такое... │... │
+└──────────────────────────────────────────────┘
+
+Некластерный индекс (idx_category):
+┌───────────────┬────┐      ┌────────────────────┐
+│ category_id   │ id │──────│ PRIMARY KEY (id)   │  ← Ссылка на кластерный
+├───────────────┼────┤      ├────────────────────┤
+│ 1             │ 1  │      │ id=1: данные...    │
+│ 1             │ 2  │      │ id=2: данные...    │
+│ 2             │ 3  │      │ id=3: данные...    │
+└───────────────┴────┘      └────────────────────┘
+```
+
+**Поиск по некластерному индексу:**
+
+```sql
+SELECT * FROM questions WHERE category_id = 1;
+```
+
+1. Находим `category_id = 1` в некластерном индексе
+2. Получаем `id = 1, 2`
+3. Идём в кластерный индекс по `id`
+4. Получаем полные строки
+
+**Это называется "Index Lookup" или "Bookmark Lookup"**
+
+#### Покрытие индекса (Covering Index)
+
+**Определение:** Некластерный индекс, который содержит ВСЕ данные для запроса.
+
+```sql
+-- Создаём покрывающий индекс
+CREATE INDEX idx_covering ON questions (category_id, difficulty, points);
+
+-- Запрос использует только индекс (без обращения к таблице!)
+EXPLAIN SELECT category_id, difficulty, points 
+FROM questions 
+WHERE category_id = 1;
+-- Extra: Using index (все данные в некластерном индексе!)
+```
+
+**Преимущества:**
+- Не нужно обращаться к кластерному индексу
+- Все данные уже в некластерном индексе
+- Максимальная производительность
+
+#### MyISAM (устаревший движок)
+
+В MyISAM **все индексы некластерные**:
+
+```sql
+CREATE TABLE questions_myisam (
+    id INT PRIMARY KEY,
+    question_text TEXT
+) ENGINE=MyISAM;  -- Все индексы некластерные
+```
+
+**Структура:**
+```
+Индексы (.MYI)         Данные (.MYD)
+┌───────────┬────┐     ┌────────────────────┐
+│ id        │ptr │────▶│ ptr: данные...     │
+└───────────┴────┘     └────────────────────┘
+```
+
 ### Создание индексов
 
 **Синтаксис CREATE INDEX:**
@@ -477,6 +662,616 @@ ORDER BY size_mb DESC;
 
 -- Способ 3: Через SHOW TABLE STATUS
 SHOW TABLE STATUS FROM quiz_db;
+```
+
+---
+
+## 5.3. Оператор EXPLAIN — Анализ запросов
+
+### Что такое EXPLAIN?
+
+**EXPLAIN** — оператор для анализа плана выполнения запроса без его фактического выполнения.
+
+**Назначение:**
+- Показать, как MySQL выполняет запрос
+- Определить используемые индексы
+- Найти узкие места производительности
+- Оптимизировать медленные запросы
+
+### Синтаксис EXPLAIN
+
+```sql
+-- Базовый синтаксис
+EXPLAIN select_statement;
+
+-- С указанием таблиц
+EXPLAIN table_name;
+
+-- Расширенный формат (MySQL 5.7+, MariaDB 10.1+)
+EXPLAIN FORMAT=JSON select_statement;
+
+-- С выполнением запроса (MySQL 8.0.18+)
+EXPLAIN ANALYZE select_statement;
+
+-- Для удалённого сервера (MySQL 8.0+)
+EXPLAIN FORMAT=TREE select_statement;
+```
+
+**Параметры:**
+- `FORMAT=TABULAR` — табличный формат (по умолчанию)
+- `FORMAT=JSON` — JSON с детальной статистикой
+- `FORMAT=TREE` — древовидный формат (MySQL 8.0+)
+- `ANALYZE` — выполнить запрос с профилированием
+
+**Важно:** В MariaDB 10.10+ используется отдельная команда `ANALYZE`:
+
+```sql
+-- MariaDB 10.10+
+ANALYZE SELECT * FROM players;
+ANALYZE FORMAT=JSON SELECT * FROM players;
+ANALYZE FORMAT=BOX SELECT * FROM players;  -- ASCII-графика
+ANALYZE FORMAT=TREE SELECT * FROM players;
+```
+
+### Поля вывода EXPLAIN
+
+```sql
+EXPLAIN SELECT p.username, p.email, COUNT(gs.id) AS games_count
+FROM players p
+JOIN game_sessions gs ON p.id = gs.player_id
+WHERE p.total_score > 1000
+  AND gs.status = 'completed'
+GROUP BY p.id
+HAVING games_count > 5
+ORDER BY games_count DESC
+LIMIT 10;
+```
+
+**Пример вывода:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | p | range | idx_score | idx_score | 5 | NULL | 50000 | 100.00 | Using where; Using temporary; Using filesort |
+| 1 | SIMPLE | gs | ref | idx_player,idx_status | idx_player | 5 | p.id | 10 | 10.00 | Using where |
+
+### Подробное описание полей
+
+#### 1. id
+
+**Описание:** Номер последовательности выполнения SELECT.
+
+**Значения:**
+- Одинаковый `id` — таблицы обрабатываются в порядке сверху вниз
+- Разный `id` — вложенные запросы (подзапросы)
+- `NULL` — объединение результатов (UNION)
+
+```sql
+-- Пример с подзапросом
+EXPLAIN SELECT * FROM players 
+WHERE id IN (SELECT player_id FROM game_sessions WHERE score > 100);
+```
+
+```
+| id | select_type    | table         |
+|----|----------------|---------------|
+| 1  | PRIMARY        | players       |  ← Внешний запрос
+| 2  | SUBQUERY       | game_sessions |  ← Подзапрос
+```
+
+#### 2. select_type
+
+**Описание:** Тип SELECT запроса.
+
+| Значение | Описание | Пример |
+|----------|----------|--------|
+| **SIMPLE** | Простой SELECT без UNION и подзапросов | `SELECT * FROM table` |
+| **PRIMARY** | Внешний запрос | `SELECT ... FROM (SELECT ...) AS sub` |
+| **SUBQUERY** | Подзапрос в SELECT | `SELECT (SELECT COUNT(*) FROM ...) AS cnt` |
+| **DERIVED** | Подзапрос в FROM | `SELECT * FROM (SELECT ...) AS sub` |
+| **UNION** | Второй или последующий SELECT в UNION | `SELECT ... UNION SELECT ...` |
+| **UNION RESULT** | Результат UNION | `SELECT ... UNION SELECT ...` |
+
+```sql
+-- UNION пример
+EXPLAIN SELECT id FROM players WHERE total_score > 1000
+UNION
+SELECT id FROM players WHERE games_played > 50;
+```
+
+```
+| id | select_type    | table   |
+|----|----------------|---------|
+| 1  | PRIMARY        | players |
+| 2  | UNION          | players |
+| NULL | UNION RESULT | NULL    |
+```
+
+#### 3. table
+
+**Описание:** Имя таблицы (или псевдоним).
+
+```sql
+EXPLAIN SELECT p.username FROM players p;
+```
+
+```
+| table |
+|-------|
+| p     |  ← Псевдоним
+```
+
+#### 4. type (ВАЖНО!)
+
+**Описание:** Тип соединения/доступа к данным. **Один из самых важных показателей!**
+
+**От лучшего к худшему:**
+
+| Type | Описание | Пример |
+|------|----------|--------|
+| **system** | Таблица содержит одну строку | `SELECT * FROM single_row_table` |
+| **const** | Константа (1 строка по PRIMARY/UNIQUE) | `WHERE id = 1` |
+| **eq_ref** | Уникальный ключ (1 строка на комбинацию) | `JOIN по PRIMARY KEY` |
+| **ref** | Не уникальный индекс (несколько строк) | `WHERE username = 'alex'` |
+| **fulltext** | Полнотекстовый поиск | `MATCH() AGAINST()` |
+| **ref_or_null** | ref + проверка на NULL | `WHERE col = 'val' OR col IS NULL` |
+| **index_merge** | Объединение нескольких индексов | `WHERE col1 = 1 OR col2 = 2` |
+| **range** | Диапазон по индексу | `WHERE id BETWEEN 1 AND 100` |
+| **index** | Полное сканирование индекса | `SELECT COUNT(*) FROM table` |
+| **ALL** | Полное сканирование таблицы ❌ | `WHERE LOWER(username) = 'alex'` |
+
+**Рекомендации:**
+- ✅ **Хорошо:** system, const, eq_ref, ref, range
+- ⚠️ **Допустимо:** index (для COUNT, MIN, MAX)
+- ❌ **Плохо:** ALL (особенно на больших таблицах)
+
+**Примеры:**
+
+```sql
+-- const (отлично)
+EXPLAIN SELECT * FROM players WHERE id = 1;
+-- type: const
+
+-- ref (хорошо)
+EXPLAIN SELECT * FROM players WHERE username = 'alex';
+-- type: ref
+
+-- range (хорошо)
+EXPLAIN SELECT * FROM players WHERE total_score > 1000;
+-- type: range
+
+-- ALL (плохо)
+EXPLAIN SELECT * FROM players WHERE YEAR(created_at) = 2024;
+-- type: ALL (функция в WHERE)
+```
+
+#### 5. possible_keys
+
+**Описание:** Индексы, которые **могут** быть использованы.
+
+```sql
+EXPLAIN SELECT * FROM players WHERE username = 'alex' AND total_score > 1000;
+```
+
+```
+| possible_keys        |
+|----------------------|
+| idx_username,idx_score |
+```
+
+**Если NULL:** Нет подходящих индексов — создайте!
+
+#### 6. key
+
+**Описание:** Индекс, который **фактически** используется.
+
+```sql
+EXPLAIN SELECT * FROM players WHERE username = 'alex';
+```
+
+```
+| key        |
+|------------|
+| idx_username |
+```
+
+**Если NULL:** Индекс не используется — проверьте запрос!
+
+#### 7. key_len
+
+**Описание:** Длина используемой части индекса в байтах.
+
+**Расчёт:**
+- `INT` = 4 байта
+- `BIGINT` = 8 байт
+- `VARCHAR(N)` = N × 3 + 2 байта (utf8mb4)
+- `NULL` = +1 байт
+
+```sql
+CREATE INDEX idx_composite ON players (username, total_score);
+-- username VARCHAR(50) = 50×3 + 2 = 152 байта
+-- total_score INT = 4 байта
+-- NULL не разрешён = 0 байт
+
+EXPLAIN SELECT * FROM players WHERE username = 'alex' AND total_score > 1000;
+```
+
+```
+| key_len |
+|---------|
+| 156     |  ← 152 + 4 = используется весь индекс
+```
+
+**Если key_len меньше ожидаемого:** Используется только часть индекса!
+
+#### 8. ref
+
+**Описание:** Столбцы или константы для сравнения с индексом.
+
+```sql
+EXPLAIN SELECT p.*, gs.score 
+FROM players p
+JOIN game_sessions gs ON p.id = gs.player_id
+WHERE p.username = 'alex';
+```
+
+```
+| table | ref                    |
+|-------|------------------------|
+| p     | const                  |  ← Константа
+| gs    | p.id                   |  ← Столбец из другой таблицы |
+```
+
+**Значения:**
+- `const` — сравнение с константой
+- `table.column` — сравнение со столбцом
+- `func` — результат функции
+
+#### 9. rows (ВАЖНО!)
+
+**Описание:** Оцениваемое количество строк для проверки.
+
+```sql
+EXPLAIN SELECT * FROM players WHERE username = 'alex';
+```
+
+```
+| rows |
+|------|
+| 1    |  ← Ожидается 1 строка (уникальный индекс)
+```
+
+```sql
+EXPLAIN SELECT * FROM players WHERE total_score > 1000;
+```
+
+```
+| rows  |
+|-------|
+| 50000 |  ← Ожидается 50000 строк (диапазон)
+```
+
+**Чем меньше, тем лучше!**
+
+#### 10. filtered
+
+**Описание:** Процент строк, прошедших фильтрацию (MySQL 5.7+).
+
+```sql
+EXPLAIN SELECT * FROM players WHERE username = 'alex' AND total_score > 1000;
+```
+
+```
+| rows | filtered |
+|------|----------|
+| 100  | 10.00    |  ← 10% строк пройдут фильтр
+```
+
+**Расчёт:** `rows × filtered / 100` = фактическое количество строк
+
+#### 11. Extra (ВАЖНО!)
+
+**Описание:** Дополнительная информация о выполнении.
+
+| Значение | Описание | Хорошо/Плохо |
+|----------|----------|--------------|
+| **Using index** | Все данные в индексе (Covering Index) | ✅ Отлично |
+| **Using where** | Фильтрация по WHERE | ✅ Нормально |
+| **Using index condition** | Индекс используется для фильтрации | ✅ Хорошо |
+| **Using temporary** | Временная таблица для GROUP BY/SORT | ⚠️ Плохо |
+| **Using filesort** | Сортировка вне индекса | ⚠️ Плохо |
+| **Using join buffer** | Буфер для JOIN без индекса | ❌ Очень плохо |
+| **Impossible WHERE** | WHERE всегда ложен | ⚠️ Проверьте логику |
+| **Distinct** | Оптимизация DISTINCT | ✅ Нормально |
+| **Not exists** | Оптимизация NOT EXISTS | ✅ Нормально |
+
+**Примеры:**
+
+```sql
+-- Using index (отлично)
+EXPLAIN SELECT username FROM players WHERE username = 'alex';
+-- Extra: Using index
+
+-- Using temporary; Using filesort (плохо)
+EXPLAIN SELECT username, COUNT(*) 
+FROM players 
+GROUP BY username 
+ORDER BY COUNT(*) DESC;
+-- Extra: Using temporary; Using filesort
+
+-- Using where; Using index condition (хорошо)
+EXPLAIN SELECT * FROM players WHERE total_score > 1000;
+-- Extra: Using where; Using index condition
+```
+
+### Примеры анализа запросов
+
+#### Пример 1: Простой SELECT с индексом
+
+```sql
+EXPLAIN SELECT * FROM players WHERE id = 1;
+```
+
+**Вывод:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | players | const | PRIMARY | PRIMARY | 4 | const | 1 | 100.00 | NULL |
+
+**Анализ:**
+- ✅ `type: const` — отличный доступ по PRIMARY KEY
+- ✅ `rows: 1` — ожидается 1 строка
+- ✅ `key: PRIMARY` — используется первичный ключ
+- **Вывод:** Запрос оптимизирован идеально
+
+#### Пример 2: SELECT с диапазоном
+
+```sql
+EXPLAIN SELECT * FROM players WHERE total_score > 1000;
+```
+
+**Вывод:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | players | range | idx_score | idx_score | 5 | NULL | 50000 | 100.00 | Using where |
+
+**Анализ:**
+- ✅ `type: range` — хороший диапазон по индексу
+- ⚠️ `rows: 50000` — много строк, но это диапазон
+- ✅ `key: idx_score` — используется индекс
+- **Вывод:** Запрос оптимизирован хорошо
+
+#### Пример 3: SELECT без индекса (ПЛОХО)
+
+```sql
+EXPLAIN SELECT * FROM players WHERE YEAR(created_at) = 2024;
+```
+
+**Вывод:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | players | ALL | NULL | NULL | NULL | NULL | 1000000 | 10.00 | Using where |
+
+**Анализ:**
+- ❌ `type: ALL` — полное сканирование таблицы!
+- ❌ `possible_keys: NULL` — нет подходящих индексов
+- ❌ `key: NULL` — индекс не используется
+- ❌ `rows: 1000000` — сканируем миллион строк!
+- **Проблема:** Функция `YEAR()` в WHERE предотвращает использование индекса
+- **Решение:**
+
+```sql
+-- Создаём индекс
+CREATE INDEX idx_created ON players(created_at);
+
+-- Переписываем запрос
+SELECT * FROM players 
+WHERE created_at >= '2024-01-01' 
+  AND created_at < '2025-01-01';
+```
+
+**После оптимизации:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | players | range | idx_created | idx_created | 5 | NULL | 100000 | 100.00 | Using where |
+
+- ✅ `type: range` — диапазон по индексу
+- ✅ `rows: 100000` — в 10 раз меньше строк
+- **Улучшение:** В 10 раз быстрее!
+
+#### Пример 4: JOIN с индексами
+
+```sql
+EXPLAIN SELECT p.username, gs.score
+FROM players p
+JOIN game_sessions gs ON p.id = gs.player_id
+WHERE p.total_score > 1000;
+```
+
+**Вывод:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | p | range | idx_score | idx_score | 5 | NULL | 50000 | 100.00 | Using where |
+| 1 | SIMPLE | gs | ref | idx_player | idx_player | 5 | p.id | 10 | 100.00 | Using where |
+
+**Анализ:**
+- ✅ `p.type: range` — диапазон по индексу
+- ✅ `gs.type: ref` — соединение по индексу
+- ✅ `gs.ref: p.id` — используется связь
+- ✅ `gs.rows: 10` — мало строк на соединение
+- **Вывод:** JOIN оптимизирован хорошо
+
+#### Пример 5: GROUP BY с проблемами
+
+```sql
+EXPLAIN SELECT username, COUNT(*) AS games
+FROM game_sessions gs
+JOIN players p ON gs.player_id = p.id
+GROUP BY p.username
+ORDER BY games DESC
+LIMIT 10;
+```
+
+**Вывод:**
+
+| id | select_type | table | type | possible_keys | key | key_len | ref | rows | filtered | Extra |
+|----|-------------|-------|------|---------------|-----|---------|-----|------|----------|-------|
+| 1 | SIMPLE | gs | ALL | idx_player | NULL | NULL | NULL | 500000 | 100.00 | Using temporary; Using filesort |
+| 1 | SIMPLE | p | eq_ref | PRIMARY | PRIMARY | 4 | gs.player_id | 1 | 100.00 | Using index |
+
+**Анализ:**
+- ❌ `gs.type: ALL` — полное сканирование!
+- ❌ `Extra: Using temporary; Using filesort` — временная таблица и сортировка
+- **Проблема:** Нет индекса для GROUP BY
+- **Решение:**
+
+```sql
+-- Создаём индекс для GROUP BY
+CREATE INDEX idx_player_id ON game_sessions(player_id);
+
+-- Или покрывающий индекс
+CREATE INDEX idx_player_count ON game_sessions(player_id, score);
+```
+
+### EXPLAIN FORMAT=JSON
+
+```sql
+EXPLAIN FORMAT=JSON 
+SELECT * FROM players WHERE total_score > 1000;
+```
+
+**Пример вывода (сокращённо):**
+
+```json
+{
+  "query_block": {
+    "select_id": 1,
+    "cost_info": {
+      "query_cost": "60001.20"
+    },
+    "table": {
+      "table_name": "players",
+      "access_type": "range",
+      "possible_keys": ["idx_score"],
+      "key": "idx_score",
+      "key_length": "5",
+      "used_key_parts": ["total_score"],
+      "rows": 50000,
+      "filtered": 100.00,
+      "index_condition": "(total_score > 1000)",
+      "cost_info": {
+        "read_cost": "10000.00",
+        "eval_cost": "50000.00",
+        "prefix_cost": "60001.20"
+      }
+    }
+  }
+}
+```
+
+**Преимущества JSON формата:**
+- Детальная информация о стоимости
+- Использованные части индекса
+- Стоимость чтения и вычислений
+- Планировщик запросов
+
+### EXPLAIN ANALYZE (MySQL 8.0.18+)
+
+```sql
+EXPLAIN ANALYZE 
+SELECT * FROM players WHERE total_score > 1000;
+```
+
+**Пример вывода:**
+
+```
+-> Index range scan on players using idx_score (total_score > 1000)  
+   (cost=60001.20 rows=50000) (actual time=0.500..150.250 rows=50000 loops=1)
+```
+
+**Преимущества:**
+- Фактическое время выполнения
+- Фактическое количество строк
+- Количество циклов
+- Реальная производительность
+
+### Рекомендации по оптимизации
+
+#### 1. Избегайте type: ALL
+
+```sql
+-- ❌ Плохо
+EXPLAIN SELECT * FROM questions WHERE YEAR(created_at) = 2024;
+-- type: ALL
+
+-- ✅ Хорошо
+EXPLAIN SELECT * FROM questions 
+WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01';
+-- type: range
+```
+
+#### 2. Создавайте индексы для WHERE
+
+```sql
+-- ❌ Нет индекса
+EXPLAIN SELECT * FROM players WHERE email = 'test@example.com';
+-- type: ALL, key: NULL
+
+-- ✅ Создаём индекс
+CREATE INDEX idx_email ON players(email);
+
+EXPLAIN SELECT * FROM players WHERE email = 'test@example.com';
+-- type: ref, key: idx_email
+```
+
+#### 3. Используйте Covering Index
+
+```sql
+-- ✅ Все данные в индексе
+CREATE INDEX idx_covering ON players(username, email);
+
+EXPLAIN SELECT username, email FROM players WHERE username = 'alex';
+-- Extra: Using index (без обращения к таблице!)
+```
+
+#### 4. Избегайте Using temporary и Using filesort
+
+```sql
+-- ❌ Временная таблица и сортировка
+EXPLAIN SELECT username, COUNT(*) 
+FROM players 
+GROUP BY username 
+ORDER BY COUNT(*) DESC;
+-- Extra: Using temporary; Using filesort
+
+-- ✅ Индекс для GROUP BY
+CREATE INDEX idx_username ON players(username);
+
+EXPLAIN SELECT username, COUNT(*) 
+FROM players 
+GROUP BY username;
+-- Extra: Using index for group-by
+```
+
+#### 5. Проверяйте порядок столбцов в составном индексе
+
+```sql
+CREATE INDEX idx_composite ON players (category_id, difficulty, points);
+
+-- ✅ Использует индекс
+EXPLAIN SELECT * FROM players 
+WHERE category_id = 1 AND difficulty = 'easy';
+
+-- ✅ Использует часть индекса
+EXPLAIN SELECT * FROM players 
+WHERE category_id = 1;
+
+-- ❌ Не использует индекс (нарушен порядок)
+EXPLAIN SELECT * FROM players 
+WHERE difficulty = 'easy';
 ```
 
 ### Рекомендации по размеру индексов

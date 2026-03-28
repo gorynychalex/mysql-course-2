@@ -194,16 +194,203 @@ mysql/
 
 ### Структура директории data
 
+**Путь по умолчанию:**
+- **Linux:** `/var/lib/mysql/`
+- **Windows:** `C:\ProgramData\MySQL\MySQL Server X.X\Data\`
+- **macOS:** `/usr/local/mysql/data/`
+- **Docker:** `/var/lib/mysql/` (внутри контейнера)
+
 ```
 data/
-├── mysql/         # Системная база данных (пользователи, привилегии)
-├── information_schema/  # Метаданные о всех базах
-├── performance_schema/  # Данные о производительности
-├── sys/           # Упрощенный доступ к performance_schema
-└── <database_name>/  # Пользовательские базы данных
-    ├── table_name.frm    # Определение таблицы (в старых версиях)
-    ├── table_name.ibd    # Данные и индексы (InnoDB)
-    └── db.opt            # Опции базы данных
+├── mysql/                    # Системная база данных
+│   ├── user.MYD             # Данные пользователей
+│   ├── user.MYI             # Индексы пользователей
+│   ├── db.MYD               # Привилегии баз данных
+│   ├── tables_priv.MYD      # Привилегии таблиц
+│   └── ...
+├── information_schema/       # Метаданные (виртуальная БД)
+├── performance_schema/       # Метрики производительности
+├── sys/                      # Упрощённый доступ к performance_schema
+├── #innodb_redo/            # Redo log (InnoDB)
+├── #innodb_temp/            # Временные таблицы InnoDB
+├── undo_001, undo_002       # Undo tablespace
+├── ibdata1                   # System tablespace (InnoDB)
+├── ib_logfile0, ib_logfile1  # Redo log files
+├── auto.cnf                  # UUID сервера
+├── ca.pem, server-cert.pem   # SSL сертификаты
+├── mysql.sock                # Unix socket (Linux/macOS)
+├── mysql.pid                 # PID файл процесса
+├── error.log                 # Журнал ошибок
+├── slow.log                  # Медленные запросы
+└── <database_name>/          # Пользовательские базы данных
+    ├── db.opt                # Опции базы данных
+    ├── tables.TRM            # Метаданные таблицы
+    ├── tables.frm            # Структура таблицы (до MySQL 8.0)
+    ├── tables.ibd            # Данные и индексы (InnoDB)
+    └── tables.CSM/CSV        # Fulltext индекс (InnoDB)
+```
+
+### Файлы системной базы данных (mysql)
+
+| Файл | Описание |
+|------|----------|
+| `user.MYD/MYI` | Пользователи и глобальные привилегии |
+| `db.MYD/MYI` | Привилегии на уровне баз данных |
+| `tables_priv.MYD/MYI` | Привилегии на уровне таблиц |
+| `columnspriv.MYD/MYI` | Привилегии на уровне столбцов |
+| `procspriv.MYD/MYI` | Привилегии на процедуры/функции |
+| `proxiespriv.MYD/MYI` | Привилегии прокси-пользователей |
+| `time_zone*` | Таблицы часовых поясов |
+| `help_*` | Таблицы справки |
+
+### Файлы пользовательских баз данных
+
+#### InnoDB (движок по умолчанию)
+
+| Файл | Описание | Размер |
+|------|----------|--------|
+| `.ibd` | Данные таблицы и индексы | Зависит от данных |
+| `.TRM` | Метаданные таблицы | ~1 KB |
+| `.par` | Партиции (если есть) | Зависит от партиций |
+| `.TRG` | Триггеры (если есть) | ~1 KB |
+| `.TRN` | Триггеры (namespace) | ~1 KB |
+
+**Пример для викторины:**
+```
+quiz_db/
+├── categories.ibd      # Данные категорий
+├── questions.ibd       # Данные вопросов
+├── answers.ibd         # Данные ответов
+├── players.ibd         # Данные игроков
+├── game_sessions.ibd   # Данные сессий
+├── session_answers.ibd # Данные ответов в сессиях
+└── db.opt              # Опции БД (кодировка и т.д.)
+```
+
+#### MyISAM (устаревший)
+
+| Файл | Описание |
+|------|----------|
+| `.MYD` | MyISAM Data — данные таблицы |
+| `.MYI` | MyISAM Index — индексы |
+| `.frm` | Format — структура таблицы |
+
+### Файлы InnoDB tablespace
+
+```
+ibdata1  # System tablespace (общий для всех таблиц)
+├── Data Dictionary        # Словарь данных
+├── Doublewrite Buffer     # Защита от частичной записи
+├── Insert Buffer          # Буфер вставки индексов
+├── Undo Logs              # Журналы отката
+└── Table Metadata         # Метаданные таблиц
+
+# При innodb_file_per_table=1 (по умолчанию):
+database/
+├── table1.ibd  # Отдельный tablespace для table1
+├── table2.ibd  # Отдельный tablespace для table2
+└── ...
+```
+
+### Журналы (Log Files)
+
+| Файл | Описание | Размер по умолчанию |
+|------|----------|---------------------|
+| `ib_logfile0`, `ib_logfile1` | Redo log (InnoDB) | 48 MB каждый |
+| `#innodb_redo/` | Redo log (MySQL 8.0.30+) | Зависит от настроек |
+| `error.log` | Журнал ошибок сервера | Не ограничен |
+| `slow.log` | Медленные запросы | Не ограничен |
+| `binlog.*` | Binary log (репликация/backup) | 192 MB каждый |
+
+### Временные файлы
+
+```
+#innodb_temp/           # Временные таблицы InnoDB
+├── temp_1.ibt
+├── temp_2.ibt
+└── ...
+
+tmp/                    # Временные файлы сортировки
+├── #sql_123_0.MYI
+├── #sql_123_0.MYD
+└── ...
+```
+
+### Конфигурационные файлы
+
+| Файл | Описание |
+|------|----------|
+| `my.cnf` (Linux) | Основной конфигурационный файл |
+| `my.ini` (Windows) | Основной конфигурационный файл |
+| `auto.cnf` | UUID сервера (автоматически) |
+| `mysql.cnf` | Дополнительные настройки (Debian/Ubuntu) |
+
+### Проверка расположения файлов
+
+```sql
+-- Директория данных
+SHOW VARIABLES LIKE 'datadir';
+-- /var/lib/mysql/
+
+-- Базовая директория
+SHOW VARIABLES LIKE 'basedir';
+-- /usr/local/mysql/
+
+-- Путь к socket
+SHOW VARIABLES LIKE 'socket';
+-- /tmp/mysql.sock
+
+-- Binary log
+SHOW VARIABLES LIKE 'log_bin_basename';
+-- /var/log/mysql/mysql-bin
+
+-- Error log
+SHOW VARIABLES LIKE 'log_error';
+-- /var/log/mysql/error.log
+
+-- Все пути
+SHOW VARIABLES LIKE '%dir%';
+SHOW VARIABLES LIKE '%log%';
+```
+
+### Размеры файлов (пример для quiz_db)
+
+```sql
+-- Размер всех баз данных
+SELECT 
+    table_schema AS database_name,
+    ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
+FROM information_schema.tables
+GROUP BY table_schema
+ORDER BY size_mb DESC;
+
+-- Размер конкретной базы
+SELECT 
+    table_name,
+    ROUND(data_length / 1024 / 1024, 2) AS data_mb,
+    ROUND(index_length / 1024 / 1024, 2) AS index_mb,
+    ROUND((data_length + index_length) / 1024 / 1024, 2) AS total_mb
+FROM information_schema.tables
+WHERE table_schema = 'quiz_db'
+ORDER BY total_mb DESC;
+```
+
+### Резервное копирование файлов
+
+**Важно:** Копируйте файлы только при остановленном сервере!
+
+```bash
+# Остановка сервера
+sudo systemctl stop mysql
+
+# Копирование данных
+cp -r /var/lib/mysql /backup/mysql_backup_$(date +%Y%m%d)
+
+# Запуск сервера
+sudo systemctl start mysql
+
+# Или используйте mysqldump
+mysqldump -u root -p --all-databases > backup.sql
 ```
 
 ---
